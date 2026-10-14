@@ -1,0 +1,5 @@
+target/
+node_modules/
+editor/dist/
+editor/src-tauri/gen/schemas/
+*.tmp
