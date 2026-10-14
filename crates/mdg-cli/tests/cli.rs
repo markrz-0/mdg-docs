@@ -203,11 +203,13 @@ fn reads_deep_hierarchies() {
         .unwrap();
     assert_eq!(tree.code, 0);
     // Too deep for serde_json's default recursion limit, so check the text.
-    assert!(tree.stdout.starts_with("{
+    assert!(tree.stdout.starts_with(
+        "{
   \"id\": \"root\",
   \"name\": \"Untitled\",
   \"children\": [
     {
-      \"id\": \"m0\""));
+      \"id\": \"m0\""
+    ));
     assert!(tree.stdout.contains("\"id\": \"m1999\""));
 }

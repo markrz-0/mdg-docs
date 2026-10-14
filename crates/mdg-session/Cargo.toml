@@ -1,0 +1,15 @@
+[package]
+name = "mdg-session"
+description = "Editor session for MDG: undo history, layout, routing previews and file handling."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mdg-core = { path = "../mdg-core" }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+
+[dev-dependencies]
+tempfile = "3"
