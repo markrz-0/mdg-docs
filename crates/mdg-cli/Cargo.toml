@@ -1,0 +1,21 @@
+[package]
+name = "mdg-cli"
+description = "mdg — command-line interface for MDG (Markdown Graph) documents."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "mdg"
+path = "src/main.rs"
+
+[dependencies]
+mdg-core = { path = "../mdg-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+terminal_size = "0.4"
+
+[dev-dependencies]
+base64 = "0.22"
+tempfile = "3"

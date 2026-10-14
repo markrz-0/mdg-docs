@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/mdg-core"]
-default-members = ["crates/mdg-core"]
+members = ["crates/mdg-core", "crates/mdg-cli"]
+default-members = ["crates/mdg-core", "crates/mdg-cli"]
 
 [workspace.package]
 version = "0.1.0"

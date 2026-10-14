@@ -3,6 +3,12 @@
 version = 3
 
 [[package]]
+name = "base64"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
 name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -127,6 +133,18 @@ name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
+
+[[package]]
+name = "mdg-cli"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "mdg-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "terminal_size",
+]
 
 [[package]]
 name = "mdg-core"
@@ -278,6 +296,16 @@ dependencies = [
  "fastrand",
  "getrandom",
  "once_cell",
+ "rustix",
+ "windows-sys",
+]
+
+[[package]]
+name = "terminal_size"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
+dependencies = [
  "rustix",
  "windows-sys",
 ]
