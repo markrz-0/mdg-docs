@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/mdg-core", "crates/mdg-cli", "crates/mdg-session"]
+members = ["crates/mdg-core", "crates/mdg-cli", "crates/mdg-session", "editor/src-tauri"]
 default-members = ["crates/mdg-core", "crates/mdg-cli", "crates/mdg-session"]
 
 [workspace.package]

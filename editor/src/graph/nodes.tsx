@@ -1,0 +1,80 @@
+import { Handle, Position, type NodeProps } from '@xyflow/react';
+import type { MouseEvent } from 'react';
+import { commands } from '../api';
+import { run } from '../state/store';
+import type { BoundaryFlowNode, ModuleFlowNode, PortView } from './buildGraph';
+
+function PortLabel({ moduleId, port, selected }: { moduleId: string; port: PortView; selected: boolean }) {
+  const onClick = (event: MouseEvent) => {
+    event.stopPropagation();
+    void run(commands.select({ kind: 'port', moduleId, portId: port.id }));
+  };
+  return (
+    <span
+      className={`port-label${selected ? ' selected' : ''}`}
+      onClick={onClick}
+      title={`${port.name} (${port.id})`}
+      data-testid={`port-${moduleId}-${port.id}`}
+    >
+      {port.name}
+    </span>
+  );
+}
+
+/** A child module: name, inputs (left handles) and outputs (right handles). */
+export function ModuleNode({ data, selected }: NodeProps<ModuleFlowNode>) {
+  return (
+    <div className={`mdg-node${selected ? ' selected' : ''}`} data-testid={`node-${data.moduleId}`}>
+      <div className="mdg-node-title">
+        <span className="mdg-node-name">{data.name}</span>
+        {data.childCount > 0 && (
+          <span className="mdg-node-badge" title="Submodules — double-click to open">
+            {data.childCount}
+          </span>
+        )}
+      </div>
+      <div className="mdg-node-ports">
+        <div className="mdg-port-column">
+          {data.inputs.map((port) => (
+            <div key={port.id} className="mdg-port mdg-port-in">
+              <Handle type="target" position={Position.Left} id={port.id} />
+              <PortLabel moduleId={data.moduleId} port={port} selected={data.selectedPortId === port.id} />
+            </div>
+          ))}
+        </div>
+        <div className="mdg-port-column right">
+          {data.outputs.map((port) => (
+            <div key={port.id} className="mdg-port mdg-port-out">
+              <PortLabel moduleId={data.moduleId} port={port} selected={data.selectedPortId === port.id} />
+              <Handle type="source" position={Position.Right} id={port.id} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The current module's own boundary. Its inputs act as sources inside the
+ * graph (handles on the right); its outputs act as destinations (handles on
+ * the left).
+ */
+export function BoundaryNode({ data }: NodeProps<BoundaryFlowNode>) {
+  const isIn = data.side === 'in';
+  return (
+    <div className={`mdg-boundary mdg-boundary-${data.side}`} data-testid={`boundary-${data.side}`}>
+      <div className="mdg-boundary-title">{isIn ? 'Inputs' : 'Outputs'} of {data.moduleName}</div>
+      {data.ports.length === 0 && <div className="mdg-boundary-empty">none</div>}
+      {data.ports.map((port) => (
+        <div key={port.id} className={`mdg-port ${isIn ? 'mdg-port-out' : 'mdg-port-in'}`}>
+          {!isIn && <Handle type="target" position={Position.Left} id={port.id} />}
+          <PortLabel moduleId={data.moduleId} port={port} selected={data.selectedPortId === port.id} />
+          {isIn && <Handle type="source" position={Position.Right} id={port.id} />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export const nodeTypes = { module: ModuleNode, boundary: BoundaryNode };

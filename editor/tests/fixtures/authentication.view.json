@@ -1,0 +1,556 @@
+{
+  "document": {
+    "rootId": "application",
+    "title": "Authentication Example",
+    "modules": {
+      "application": {
+        "id": "application",
+        "parentId": null,
+        "name": "Application",
+        "description": "A small web application with a browser frontend, an HTTP API and a\nstateless JWT validator.\n\nConnections describe *possible* message flow only. Ordering, retries and\nerror handling are described in each module.",
+        "inputs": [],
+        "outputs": [],
+        "childIds": [
+          "frontend",
+          "api-service",
+          "jwt-validator"
+        ],
+        "connections": [
+          {
+            "id": "root-login",
+            "from": {
+              "moduleId": "frontend",
+              "portId": "login-submitted"
+            },
+            "to": {
+              "moduleId": "api-service",
+              "portId": "login-request"
+            }
+          },
+          {
+            "id": "root-login-response",
+            "from": {
+              "moduleId": "api-service",
+              "portId": "login-response"
+            },
+            "to": {
+              "moduleId": "frontend",
+              "portId": "session-established"
+            }
+          },
+          {
+            "id": "root-profile",
+            "from": {
+              "moduleId": "frontend",
+              "portId": "profile-requested"
+            },
+            "to": {
+              "moduleId": "api-service",
+              "portId": "profile-request"
+            }
+          },
+          {
+            "id": "root-profile-response",
+            "from": {
+              "moduleId": "api-service",
+              "portId": "profile-response"
+            },
+            "to": {
+              "moduleId": "frontend",
+              "portId": "profile-received"
+            }
+          },
+          {
+            "id": "root-validate-token",
+            "from": {
+              "moduleId": "api-service",
+              "portId": "token-validation-request"
+            },
+            "to": {
+              "moduleId": "jwt-validator",
+              "portId": "validate-token"
+            }
+          },
+          {
+            "id": "root-validation-result",
+            "from": {
+              "moduleId": "jwt-validator",
+              "portId": "validation-result"
+            },
+            "to": {
+              "moduleId": "api-service",
+              "portId": "token-validation-result"
+            }
+          }
+        ]
+      },
+      "frontend": {
+        "id": "frontend",
+        "parentId": "application",
+        "name": "Frontend",
+        "description": "Single-page browser application.\n\n- Renders the login form and the user profile page.\n- Stores the session token in memory only (never in `localStorage`).",
+        "inputs": [
+          {
+            "id": "session-established",
+            "name": "Session Established",
+            "description": "Receives the login outcome: a signed JWT on success, or an error message on failure."
+          },
+          {
+            "id": "profile-received",
+            "name": "Profile Received",
+            "description": "Receives the user profile, or `401 Unauthorized` when the token was rejected."
+          }
+        ],
+        "outputs": [
+          {
+            "id": "login-submitted",
+            "name": "Login Submitted",
+            "description": "Emits `POST /login` with a username and password typed by the user."
+          },
+          {
+            "id": "profile-requested",
+            "name": "Profile Requested",
+            "description": "Emits `GET /profile` with the session token in the `Authorization` header."
+          }
+        ],
+        "childIds": [],
+        "connections": []
+      },
+      "api-service": {
+        "id": "api-service",
+        "parentId": "application",
+        "name": "API Service",
+        "description": "HTTP API exposed to the frontend.\n\nDelegates authentication to its **Authentication** submodule and serves\nprotected resources through **User Routes**. Token validation is\ndelegated to the shared **JWT Validator** outside this service.",
+        "inputs": [
+          {
+            "id": "login-request",
+            "name": "Login Request",
+            "description": "Receives `POST /login` requests containing user credentials."
+          },
+          {
+            "id": "profile-request",
+            "name": "Profile Request",
+            "description": "Receives `GET /profile` requests carrying a bearer token."
+          },
+          {
+            "id": "token-validation-result",
+            "name": "Token Validation Result",
+            "description": "Receives the verdict for a previously sent token validation request."
+          }
+        ],
+        "outputs": [
+          {
+            "id": "login-response",
+            "name": "Login Response",
+            "description": "Emits the login outcome: a JWT on success or `401` with a reason."
+          },
+          {
+            "id": "profile-response",
+            "name": "Profile Response",
+            "description": "Emits the profile document, or `401` when the token is invalid."
+          },
+          {
+            "id": "token-validation-request",
+            "name": "Token Validation Request",
+            "description": "Emits a bearer token that must be verified before a protected resource is served."
+          }
+        ],
+        "childIds": [
+          "authentication",
+          "user-routes"
+        ],
+        "connections": [
+          {
+            "id": "api-login",
+            "from": {
+              "moduleId": "api-service",
+              "portId": "login-request"
+            },
+            "to": {
+              "moduleId": "authentication",
+              "portId": "login-request"
+            }
+          },
+          {
+            "id": "api-token-issued",
+            "from": {
+              "moduleId": "authentication",
+              "portId": "token-issued"
+            },
+            "to": {
+              "moduleId": "api-service",
+              "portId": "login-response"
+            }
+          },
+          {
+            "id": "api-login-failed",
+            "from": {
+              "moduleId": "authentication",
+              "portId": "login-failed"
+            },
+            "to": {
+              "moduleId": "api-service",
+              "portId": "login-response"
+            }
+          },
+          {
+            "id": "api-profile",
+            "from": {
+              "moduleId": "api-service",
+              "portId": "profile-request"
+            },
+            "to": {
+              "moduleId": "user-routes",
+              "portId": "profile-request"
+            }
+          },
+          {
+            "id": "api-profile-response",
+            "from": {
+              "moduleId": "user-routes",
+              "portId": "profile-response"
+            },
+            "to": {
+              "moduleId": "api-service",
+              "portId": "profile-response"
+            }
+          },
+          {
+            "id": "api-validate-token",
+            "from": {
+              "moduleId": "user-routes",
+              "portId": "token-validation-request"
+            },
+            "to": {
+              "moduleId": "api-service",
+              "portId": "token-validation-request"
+            }
+          },
+          {
+            "id": "api-validation-result",
+            "from": {
+              "moduleId": "api-service",
+              "portId": "token-validation-result"
+            },
+            "to": {
+              "moduleId": "user-routes",
+              "portId": "token-validation-result"
+            }
+          }
+        ]
+      },
+      "jwt-validator": {
+        "id": "jwt-validator",
+        "parentId": "application",
+        "name": "JWT Validator",
+        "description": "Stateless service that verifies JWT signatures and expiry.\n\nShared by every service that serves protected resources, so it lives at\nthe root level rather than inside the API Service.",
+        "inputs": [
+          {
+            "id": "validate-token",
+            "name": "Validate Token",
+            "description": "Receives a raw bearer token to verify."
+          }
+        ],
+        "outputs": [
+          {
+            "id": "validation-result",
+            "name": "Validation Result",
+            "description": "Emits `valid` with the token claims, or `invalid` with a reason (expired, bad signature, malformed)."
+          }
+        ],
+        "childIds": [],
+        "connections": []
+      },
+      "authentication": {
+        "id": "authentication",
+        "parentId": "api-service",
+        "name": "Authentication",
+        "description": "Turns a set of credentials into a signed session token.",
+        "inputs": [
+          {
+            "id": "login-request",
+            "name": "Login Request",
+            "description": "Receives credentials from `POST /login`."
+          }
+        ],
+        "outputs": [
+          {
+            "id": "token-issued",
+            "name": "Token Issued",
+            "description": "Emits a signed JWT."
+          },
+          {
+            "id": "login-failed",
+            "name": "Login Failed",
+            "description": "Emits a rejection when the credentials are wrong or the account is locked."
+          }
+        ],
+        "childIds": [
+          "credential-validator",
+          "token-issuer"
+        ],
+        "connections": [
+          {
+            "id": "auth-check",
+            "from": {
+              "moduleId": "authentication",
+              "portId": "login-request"
+            },
+            "to": {
+              "moduleId": "credential-validator",
+              "portId": "check-credentials"
+            }
+          },
+          {
+            "id": "auth-issue",
+            "from": {
+              "moduleId": "credential-validator",
+              "portId": "credentials-valid"
+            },
+            "to": {
+              "moduleId": "token-issuer",
+              "portId": "issue-token"
+            }
+          },
+          {
+            "id": "auth-token",
+            "from": {
+              "moduleId": "token-issuer",
+              "portId": "token-issued"
+            },
+            "to": {
+              "moduleId": "authentication",
+              "portId": "token-issued"
+            }
+          },
+          {
+            "id": "auth-failed",
+            "from": {
+              "moduleId": "credential-validator",
+              "portId": "credentials-invalid"
+            },
+            "to": {
+              "moduleId": "authentication",
+              "portId": "login-failed"
+            }
+          }
+        ]
+      },
+      "user-routes": {
+        "id": "user-routes",
+        "parentId": "api-service",
+        "name": "User Routes",
+        "description": "Routes for user-owned resources. Every route requires a valid token.",
+        "inputs": [
+          {
+            "id": "profile-request",
+            "name": "Profile Request",
+            "description": "Receives `GET /profile` requests."
+          },
+          {
+            "id": "token-validation-result",
+            "name": "Token Validation Result",
+            "description": "Receives the verdict for a token sent out for validation."
+          }
+        ],
+        "outputs": [
+          {
+            "id": "profile-response",
+            "name": "Profile Response",
+            "description": "Emits the profile or a `401` response."
+          },
+          {
+            "id": "token-validation-request",
+            "name": "Token Validation Request",
+            "description": "Emits a bearer token that needs verification."
+          }
+        ],
+        "childIds": [
+          "protected-endpoint"
+        ],
+        "connections": [
+          {
+            "id": "routes-request",
+            "from": {
+              "moduleId": "user-routes",
+              "portId": "profile-request"
+            },
+            "to": {
+              "moduleId": "protected-endpoint",
+              "portId": "http-request"
+            }
+          },
+          {
+            "id": "routes-response",
+            "from": {
+              "moduleId": "protected-endpoint",
+              "portId": "http-response"
+            },
+            "to": {
+              "moduleId": "user-routes",
+              "portId": "profile-response"
+            }
+          },
+          {
+            "id": "routes-validate-token",
+            "from": {
+              "moduleId": "protected-endpoint",
+              "portId": "token-validation-request"
+            },
+            "to": {
+              "moduleId": "user-routes",
+              "portId": "token-validation-request"
+            }
+          },
+          {
+            "id": "routes-validation-result",
+            "from": {
+              "moduleId": "user-routes",
+              "portId": "token-validation-result"
+            },
+            "to": {
+              "moduleId": "protected-endpoint",
+              "portId": "token-validation-result"
+            }
+          }
+        ]
+      },
+      "credential-validator": {
+        "id": "credential-validator",
+        "parentId": "authentication",
+        "name": "Credential Validator",
+        "description": "Checks a username/password pair against the user store.\n\nPasswords are compared using a constant-time hash comparison.",
+        "inputs": [
+          {
+            "id": "check-credentials",
+            "name": "Check Credentials",
+            "description": "Receives a username and password."
+          }
+        ],
+        "outputs": [
+          {
+            "id": "credentials-valid",
+            "name": "Credentials Valid",
+            "description": "Emits the authenticated user ID."
+          },
+          {
+            "id": "credentials-invalid",
+            "name": "Credentials Invalid",
+            "description": "Emits a rejection reason."
+          }
+        ],
+        "childIds": [],
+        "connections": []
+      },
+      "token-issuer": {
+        "id": "token-issuer",
+        "parentId": "authentication",
+        "name": "Token Issuer",
+        "description": "Signs a JWT for an authenticated user. Tokens expire after 15 minutes.",
+        "inputs": [
+          {
+            "id": "issue-token",
+            "name": "Issue Token",
+            "description": "Receives an authenticated user ID."
+          }
+        ],
+        "outputs": [
+          {
+            "id": "token-issued",
+            "name": "Token Issued",
+            "description": "Emits the signed JWT."
+          }
+        ],
+        "childIds": [],
+        "connections": []
+      },
+      "protected-endpoint": {
+        "id": "protected-endpoint",
+        "parentId": "user-routes",
+        "name": "Protected Endpoint",
+        "description": "Serves `GET /profile`.\n\n1. Extracts the bearer token from the request.\n2. Sends it out for validation.\n3. When the validation result is `valid`, loads and returns the profile;\n   otherwise responds with `401 Unauthorized`.\n\nThe numbered steps describe behaviour; MDG connections themselves do not\nimply any ordering.",
+        "inputs": [
+          {
+            "id": "http-request",
+            "name": "HTTP Request",
+            "description": "Receives `GET /profile` with a bearer token."
+          },
+          {
+            "id": "token-validation-result",
+            "name": "Token Validation Result",
+            "description": "Receives the validation verdict for the extracted token."
+          }
+        ],
+        "outputs": [
+          {
+            "id": "token-validation-request",
+            "name": "Token Validation Request",
+            "description": "Emits the extracted bearer token for verification."
+          },
+          {
+            "id": "http-response",
+            "name": "HTTP Response",
+            "description": "Emits the profile document or `401 Unauthorized`."
+          }
+        ],
+        "childIds": [],
+        "connections": []
+      }
+    }
+  },
+  "positions": {
+    "frontend": {
+      "x": 0.0,
+      "y": 80.0
+    },
+    "api-service": {
+      "x": 380.0,
+      "y": 40.0
+    },
+    "jwt-validator": {
+      "x": 820.0,
+      "y": 120.0
+    },
+    "authentication": {
+      "x": 0.0,
+      "y": 0.0
+    },
+    "user-routes": {
+      "x": 0.0,
+      "y": 240.0
+    },
+    "credential-validator": {
+      "x": 0.0,
+      "y": 40.0
+    },
+    "token-issuer": {
+      "x": 320.0,
+      "y": 0.0
+    },
+    "protected-endpoint": {
+      "x": 0.0,
+      "y": 40.0
+    }
+  },
+  "fileName": "authentication.mdg",
+  "filePath": null,
+  "dirty": false,
+  "currentModuleId": "application",
+  "selection": null,
+  "error": null,
+  "canUndo": false,
+  "canRedo": false,
+  "layoutVersion": 0,
+  "validation": {
+    "valid": true,
+    "errors": 0,
+    "warnings": 0
+  },
+  "path": [
+    {
+      "id": "application",
+      "name": "Application"
+    }
+  ],
+  "details": {}
+}
