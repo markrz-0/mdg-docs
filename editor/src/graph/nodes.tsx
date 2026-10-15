@@ -2,6 +2,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { CSSProperties, MouseEvent } from 'react';
 import { commands } from '../api';
 import { TagChip } from '../components/TagChip';
+import { usePreferences } from '../state/preferences';
 import { run } from '../state/store';
 import type { BoundaryFlowNode, ModuleFlowNode, PortView } from './buildGraph';
 
@@ -31,10 +32,12 @@ function PortLabel({ moduleId, port, selected }: { moduleId: string; port: PortV
 
 /** A child module: name, inputs (left handles) and outputs (right handles). */
 export function ModuleNode({ data, selected }: NodeProps<ModuleFlowNode>) {
+  const coloring = usePreferences((s) => s.nodeColoring);
+  const color = coloring === 'tags' ? data.color : null;
   return (
     <div
-      className={`mdg-node${data.color ? ' tagged' : ''}${selected ? ' selected' : ''}`}
-      style={data.color ? ({ '--node-tag': data.color } as CSSProperties) : undefined}
+      className={`mdg-node${color ? ' tagged' : ''}${selected ? ' selected' : ''}`}
+      style={color ? ({ '--node-tag': color } as CSSProperties) : undefined}
       data-testid={`node-${data.moduleId}`}
     >
       <div className="mdg-node-title">

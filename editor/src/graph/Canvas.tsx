@@ -17,6 +17,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { commands, queries, type Endpoint, type PortKind } from '../api';
 import { boundaryKey } from '../state/layoutKeys';
+import { usePreferences, type NodeColoring } from '../state/preferences';
 import { getView, run, useEditor } from '../state/store';
 import { layoutAll, layoutChildren, type Size } from './autoLayout';
 import {
@@ -170,9 +171,31 @@ function ModuleCanvas({ currentModuleId }: { currentModuleId: string }) {
         <Background gap={20} />
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable />
+        <ColoringPanel />
         <LayoutPanel />
       </ReactFlow>
     </div>
+  );
+}
+
+/** How module nodes are coloured: one solid colour, or by their tags. */
+function ColoringPanel() {
+  const coloring = usePreferences((s) => s.nodeColoring);
+  const setColoring = usePreferences((s) => s.setNodeColoring);
+  return (
+    <Panel position="top-left" className="coloring-panel">
+      <label>
+        <span className="coloring-label">Module colour</span>
+        <select
+          value={coloring}
+          onChange={(e) => setColoring(e.target.value as NodeColoring)}
+          data-testid="node-coloring"
+        >
+          <option value="solid">Solid colour</option>
+          <option value="tags">Tag colour</option>
+        </select>
+      </label>
+    </Panel>
   );
 }
 

@@ -601,6 +601,31 @@ button:disabled {
   gap: 6px;
 }
 
+.coloring-panel label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.15);
+  font-size: 12px;
+}
+
+.coloring-label {
+  color: var(--muted);
+}
+
+.coloring-panel select {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
 .layout-panel button {
   font-size: 12px;
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.15);
