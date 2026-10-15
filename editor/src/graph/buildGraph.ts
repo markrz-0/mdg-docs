@@ -145,13 +145,15 @@ export function buildGraph(
     nodes.push(boundary('out'));
   }
 
-  // A selected port lights up every connection from or to it: blue for
-  // events, green for request/response connections.
-  const port = selection?.kind === 'port' ? selection : null;
-  const touchesPort = (ep: Endpoint) => port !== null && ep.moduleId === port.moduleId && ep.portId === port.portId;
+  // A selected port lights up every connection from or to it, and a selected
+  // module every connection on any of its ports: blue for events, green for
+  // request/response connections.
+  const touches = (ep: Endpoint) =>
+    (selection?.kind === 'port' && ep.moduleId === selection.moduleId && ep.portId === selection.portId) ||
+    (selection?.kind === 'module' && ep.moduleId === selection.moduleId);
 
   const edges: Edge[] = current.connections.map((c) => {
-    const highlighted = touchesPort(c.from) || touchesPort(c.to);
+    const highlighted = touches(c.from) || touches(c.to);
     const kind = endpointKind(doc, c.from);
     const classes = [kind === 'request' ? 'request' : null, highlighted ? 'highlighted' : null].filter(Boolean);
     return {

@@ -87,6 +87,16 @@ describe('port highlighting', () => {
     const inside = buildGraph(doc, 'api-service', view.positions, port);
     expect(highlighted(inside.edges).map((e) => e.id)).toEqual(['api-validate-token']);
   });
+
+  it('highlights every connection on any port of the selected module', () => {
+    const module: Selection = { kind: 'module', moduleId: 'api-service' };
+    const root = buildGraph(doc, 'application', view.positions, module);
+    const touching = doc.modules['application']!.connections
+      .filter((c) => c.from.moduleId === 'api-service' || c.to.moduleId === 'api-service')
+      .map((c) => c.id);
+    expect(touching).toEqual(expect.arrayContaining(['root-security-event', 'root-validate-token']));
+    expect(highlighted(root.edges).map((e) => e.id)).toEqual(touching);
+  });
 });
 
 describe('auto-layout', () => {
