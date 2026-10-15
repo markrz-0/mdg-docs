@@ -15,8 +15,12 @@ use serde_json::Value;
 
 use crate::jsmap::JsMap;
 
-/// Current schema (data model) version written by this implementation.
+/// Schema (data model) version of new documents. Documents that use no 1.1
+/// features keep this version, so they stay readable by 1.0 readers.
 pub const SCHEMA_VERSION: &str = "1.0.0";
+/// Schema version that introduced request/response ports. Written whenever a
+/// document contains one.
+pub const REQUEST_PORTS_SCHEMA_VERSION: &str = "1.1.0";
 /// Schema major version this implementation understands.
 pub const SCHEMA_MAJOR: f64 = 1.0;
 
@@ -43,15 +47,54 @@ impl std::fmt::Display for PortDirection {
     }
 }
 
+/// What travels through a port.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PortKind {
+    /// A one-way message: outputs emit it, inputs listen for it.
+    #[default]
+    Event,
+    /// A request answered by a response over the same connection. An output
+    /// sends the request (the caller); an input handles it (the handler). The
+    /// connection runs caller → handler; the response flows back implicitly.
+    Request,
+}
+
+impl PortKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PortKind::Event => "event",
+            PortKind::Request => "request",
+        }
+    }
+
+    pub fn is_event(&self) -> bool {
+        *self == PortKind::Event
+    }
+}
+
+impl std::fmt::Display for PortKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A named input or output on a module boundary.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Port {
     /// Stable ID, unique within its module (inputs and outputs share one namespace).
     pub id: String,
     /// Human-readable name. Not required to be unique.
     pub name: String,
-    /// Natural-language Markdown contract.
+    /// Omitted from JSON for events, so event-only output is unchanged.
+    #[serde(default, skip_serializing_if = "PortKind::is_event")]
+    pub kind: PortKind,
+    /// Natural-language Markdown contract. For a request port: the request.
     pub description: String,
+    /// Request ports only: Markdown contract of the response. Always empty
+    /// on event ports.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub response: String,
 }
 
 /// A reference to a port on a module.
@@ -120,6 +163,27 @@ impl Module {
     /// Inputs then outputs.
     pub fn all_ports(&self) -> impl Iterator<Item = &Port> {
         self.inputs.iter().chain(self.outputs.iter())
+    }
+}
+
+impl Document {
+    /// True when any module has a request port (a schema 1.1 feature).
+    pub fn has_request_ports(&self) -> bool {
+        self.modules.values().any(|m| m.all_ports().any(|p| p.kind == PortKind::Request))
+    }
+}
+
+/// The schema version to write for `doc`: its own version, raised to
+/// [`REQUEST_PORTS_SCHEMA_VERSION`] when it uses request ports but is older.
+pub fn schema_version_for(doc: &Document) -> String {
+    let older_than_1_1 = {
+        let mut parts = doc.format_version.split('.').map(|p| p.parse::<u64>().ok());
+        matches!((parts.next(), parts.next()), (Some(Some(1)), Some(Some(0))))
+    };
+    if older_than_1_1 && doc.has_request_ports() {
+        REQUEST_PORTS_SCHEMA_VERSION.to_string()
+    } else {
+        doc.format_version.clone()
     }
 }
 

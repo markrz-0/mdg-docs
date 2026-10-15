@@ -7,7 +7,7 @@ use mdg_session::*;
 
 fn loaded() -> Session {
     let mut s = Session::new();
-    s.load(create_authentication_example(), "authentication.mdg", None);
+    s.load(create_authentication_example_v1(), "authentication.mdg", None);
     s
 }
 
@@ -17,8 +17,29 @@ fn with_fake_clock() -> (Session, Arc<AtomicU64>) {
     let millis = Arc::new(AtomicU64::new(0));
     let m = millis.clone();
     let mut s = Session::with_clock(Arc::new(move || start + Duration::from_millis(m.load(Ordering::SeqCst))));
-    s.load(create_authentication_example(), "authentication.mdg", None);
+    s.load(create_authentication_example_v1(), "authentication.mdg", None);
     (s, millis)
+}
+
+#[test]
+fn offers_only_ports_of_the_same_kind() {
+    let mut s = Session::new();
+    s.load(create_authentication_example(), "authentication.mdg", None);
+    // Protected Endpoint's validation request can only reach request handlers.
+    let choices = s.route_choices(&ep("protected-endpoint:validate-token"), None).unwrap();
+    let labels: Vec<&str> = choices.candidates.iter().map(|c| c.label.as_str()).collect();
+    assert!(labels.contains(&"JWT Validator › Validate Token"), "{labels:?}");
+    assert!(!labels.iter().any(|l| l.contains("Security Event")), "{labels:?}");
+
+    s.navigate("application");
+    // Once disconnected, the event output can reach only the one event input.
+    assert!(s.delete_connection("root-security-event"));
+    let partners = s.connection_partners(&ep("api-service:security-event"), ConnectRole::Source).unwrap();
+    assert_eq!(partners, [ep("audit-log:security-event")]);
+
+    let id = s.add_module_port("audit-log", PortDirection::Input, PortKind::Request).unwrap();
+    let port = &s.document().modules.get("audit-log").unwrap().inputs[1];
+    assert_eq!((port.id.as_str(), port.kind), (id.as_str(), PortKind::Request));
 }
 
 fn ep(spec: &str) -> Endpoint {
@@ -44,7 +65,7 @@ fn routes_edits_through_core_operations_and_tracks_dirtiness() {
     assert!(s.dirty());
     assert_eq!(s.selection(), Some(&Selection::Module { module_id: id.clone() }));
     assert!(s.positions().get(&id).is_some());
-    let port = s.add_module_port(&id, PortDirection::Input).unwrap();
+    let port = s.add_module_port(&id, PortDirection::Input, PortKind::Event).unwrap();
     assert_eq!(module(&s, &id).inputs[0].id, port);
     assert!(s.connect(ep("frontend:login-submitted"), Endpoint::new(id.clone(), port)));
     assert!(validate_document(s.document(), ValidationOptions::default()).valid);
@@ -238,7 +259,7 @@ fn bounds_the_history_and_resets_it_on_load() {
         rename(&mut s, "frontend", &format!("n{i}"));
     }
     assert_eq!(s.past_len(), HISTORY_LIMIT);
-    s.load(create_authentication_example(), "x.mdg", None);
+    s.load(create_authentication_example_v1(), "x.mdg", None);
     assert_eq!((s.past_len(), s.future_len()), (0, 0));
 }
 
@@ -341,7 +362,7 @@ fn refuses_a_preview_computed_against_an_older_document() {
 fn opens_saves_and_refuses_invalid_files() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("arch.mdg");
-    write_mdg(&file, &create_authentication_example()).unwrap();
+    write_mdg(&file, &create_authentication_example_v1()).unwrap();
     let mut s = Session::new();
     assert!(s.open_file(&file));
     assert_eq!(s.file_name(), "arch.mdg");
@@ -356,7 +377,7 @@ fn opens_saves_and_refuses_invalid_files() {
     assert!(s.export_markdown(&dir.path().join("arch.md")));
     assert!(std::fs::read_to_string(dir.path().join("arch.md")).unwrap().contains("# Web\n"));
 
-    let mut bad = create_authentication_example();
+    let mut bad = create_authentication_example_v1();
     let mut app = (**bad.modules.get("application").unwrap()).clone();
     app.child_ids.pop();
     bad.modules.insert("application", Arc::new(app));
@@ -371,7 +392,7 @@ fn opens_saves_and_refuses_invalid_files() {
 
 #[test]
 fn round_trips_the_reference_file_unchanged() {
-    let bytes = encode_mdg(&create_authentication_example(), EncodeOptions::default()).unwrap();
+    let bytes = encode_mdg(&create_authentication_example_v1(), EncodeOptions::default()).unwrap();
     let mut s = Session::new();
     s.load(decode_mdg(&bytes).unwrap(), "a.mdg", None);
     assert_eq!(encode_mdg(&s.document_for_save(), EncodeOptions::default()).unwrap(), bytes);

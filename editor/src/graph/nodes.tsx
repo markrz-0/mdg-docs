@@ -4,18 +4,25 @@ import { commands } from '../api';
 import { run } from '../state/store';
 import type { BoundaryFlowNode, ModuleFlowNode, PortView } from './buildGraph';
 
+/** Handle colour follows the port kind: blue for events, green for requests. */
+const handleClass = (port: PortView) => (port.kind === 'request' ? 'mdg-handle-request' : undefined);
+
 function PortLabel({ moduleId, port, selected }: { moduleId: string; port: PortView; selected: boolean }) {
   const onClick = (event: MouseEvent) => {
     event.stopPropagation();
     void run(commands.select({ kind: 'port', moduleId, portId: port.id }));
   };
+  const request = port.kind === 'request';
   return (
     <span
-      className={`port-label${selected ? ' selected' : ''}`}
+      className={`port-label${request ? ' request' : ''}${selected ? ' selected' : ''}`}
       onClick={onClick}
-      title={`${port.name} (${port.id})`}
+      title={`${port.name} (${port.id}) · ${request ? 'request/response' : 'event'}`}
       data-testid={`port-${moduleId}-${port.id}`}
     >
+      <span className="port-kind" aria-label={request ? 'request/response' : 'event'}>
+        {request ? '⇄' : '→'}
+      </span>
       {port.name}
     </span>
   );
@@ -37,7 +44,7 @@ export function ModuleNode({ data, selected }: NodeProps<ModuleFlowNode>) {
         <div className="mdg-port-column">
           {data.inputs.map((port) => (
             <div key={port.id} className="mdg-port mdg-port-in">
-              <Handle type="target" position={Position.Left} id={port.id} />
+              <Handle type="target" position={Position.Left} id={port.id} className={handleClass(port)} />
               <PortLabel moduleId={data.moduleId} port={port} selected={data.selectedPortId === port.id} />
             </div>
           ))}
@@ -46,7 +53,7 @@ export function ModuleNode({ data, selected }: NodeProps<ModuleFlowNode>) {
           {data.outputs.map((port) => (
             <div key={port.id} className="mdg-port mdg-port-out">
               <PortLabel moduleId={data.moduleId} port={port} selected={data.selectedPortId === port.id} />
-              <Handle type="source" position={Position.Right} id={port.id} />
+              <Handle type="source" position={Position.Right} id={port.id} className={handleClass(port)} />
             </div>
           ))}
         </div>
@@ -68,9 +75,9 @@ export function BoundaryNode({ data }: NodeProps<BoundaryFlowNode>) {
       {data.ports.length === 0 && <div className="mdg-boundary-empty">none</div>}
       {data.ports.map((port) => (
         <div key={port.id} className={`mdg-port ${isIn ? 'mdg-port-out' : 'mdg-port-in'}`}>
-          {!isIn && <Handle type="target" position={Position.Left} id={port.id} />}
+          {!isIn && <Handle type="target" position={Position.Left} id={port.id} className={handleClass(port)} />}
           <PortLabel moduleId={data.moduleId} port={port} selected={data.selectedPortId === port.id} />
-          {isIn && <Handle type="source" position={Position.Right} id={port.id} />}
+          {isIn && <Handle type="source" position={Position.Right} id={port.id} className={handleClass(port)} />}
         </div>
       ))}
     </div>

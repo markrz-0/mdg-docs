@@ -11,7 +11,7 @@ use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 
 use crate::ids::is_valid_id;
-use crate::model::{Document, Endpoint, Module, PortDirection};
+use crate::model::{Document, Endpoint, Module, PortDirection, PortKind};
 use crate::queries::{find_module, find_port};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -54,6 +54,8 @@ pub enum IssueCode {
     ConnectionOutOfScope,
     InvalidSourceDirection,
     InvalidDestinationDirection,
+    PortKindMismatch,
+    ResponseOnEventPort,
     // warnings
     UnconnectedPort,
     DuplicateConnection,
@@ -82,6 +84,8 @@ impl IssueCode {
             IssueCode::ConnectionOutOfScope => "CONNECTION_OUT_OF_SCOPE",
             IssueCode::InvalidSourceDirection => "INVALID_SOURCE_DIRECTION",
             IssueCode::InvalidDestinationDirection => "INVALID_DESTINATION_DIRECTION",
+            IssueCode::PortKindMismatch => "PORT_KIND_MISMATCH",
+            IssueCode::ResponseOnEventPort => "RESPONSE_ON_EVENT_PORT",
             IssueCode::UnconnectedPort => "UNCONNECTED_PORT",
             IssueCode::DuplicateConnection => "DUPLICATE_CONNECTION",
         }
@@ -290,7 +294,43 @@ pub fn check_connection(
     let mut issues = Vec::new();
     issues.extend(check_endpoint(doc, container, from, Role::Source, connection_id));
     issues.extend(check_endpoint(doc, container, to, Role::Destination, connection_id));
+    if issues.is_empty() {
+        issues.extend(check_kinds(doc, container_id, from, to, connection_id));
+    }
     issues
+}
+
+/// Both ends of a connection must carry the same kind of message: events
+/// connect to events, requests to requests. Only called once both endpoints
+/// are known to exist.
+fn check_kinds(
+    doc: &Document,
+    container_id: &str,
+    from: &Endpoint,
+    to: &Endpoint,
+    connection_id: Option<&str>,
+) -> Option<ValidationIssue> {
+    let kind =
+        |ep: &Endpoint| find_module(doc, &ep.module_id).and_then(|m| find_port(m, &ep.port_id)).map(|p| p.port.kind);
+    let (from_kind, to_kind) = (kind(from)?, kind(to)?);
+    if from_kind == to_kind {
+        return None;
+    }
+    let label = match connection_id {
+        None => "Connection".to_string(),
+        Some(id) => format!("Connection \"{id}\""),
+    };
+    Some(ValidationIssue {
+        severity: Severity::Error,
+        code: IssueCode::PortKindMismatch,
+        message: format!(
+            "{label} in \"{container_id}\" joins {from_kind} port \"{from}\" to {to_kind} port \"{to}\". Both ends must be the same kind (event or request)."
+        ),
+        module_id: Some(container_id.to_string()),
+        port_id: None,
+        connection_id: connection_id.map(str::to_string),
+        layout: IssueLayout::Endpoint,
+    })
 }
 
 #[derive(Default)]
@@ -418,6 +458,17 @@ fn check_module_local(doc: &Document, key: &str, module: &Module, ctx: &mut Cont
                 IssueCode::InvalidId,
                 key,
                 format!("Port ID \"{}\" on module \"{key}\" is not a valid ID.", port.id),
+            )
+            .port_id = Some(port.id.clone());
+        }
+        if port.kind == PortKind::Event && !port.response.is_empty() {
+            ctx.error(
+                IssueCode::ResponseOnEventPort,
+                key,
+                format!(
+                    "Event port \"{key}:{}\" has a response contract. Only request ports have a response.",
+                    port.id
+                ),
             )
             .port_id = Some(port.id.clone());
         }

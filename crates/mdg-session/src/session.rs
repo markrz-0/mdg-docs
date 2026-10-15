@@ -18,7 +18,7 @@ use mdg_core::{
     add_connection, add_module, add_port, create_document, decode_mdg, encode_mdg, export_document_markdown,
     find_connection, find_module, find_port, get_module, remove_connection, remove_module, remove_port,
     validate_document, write_file_atomic, AddConnectionOptions, AddModuleOptions, AddPortOptions,
-    CreateDocumentOptions, Document, EncodeOptions, Endpoint, MdgError, PortDirection, Position, Result,
+    CreateDocumentOptions, Document, EncodeOptions, Endpoint, MdgError, PortDirection, PortKind, Position, Result,
     ValidationOptions,
 };
 use serde::{Deserialize, Serialize};
@@ -493,17 +493,19 @@ impl Session {
         Some(id)
     }
 
-    pub fn add_module_port(&mut self, module_id: &str, direction: PortDirection) -> Option<String> {
-        let name = match direction {
-            PortDirection::Input => "New input",
-            PortDirection::Output => "New output",
+    pub fn add_module_port(&mut self, module_id: &str, direction: PortDirection, kind: PortKind) -> Option<String> {
+        let name = match (kind, direction) {
+            (PortKind::Event, PortDirection::Input) => "New input",
+            (PortKind::Event, PortDirection::Output) => "New output",
+            (PortKind::Request, PortDirection::Input) => "New handled request",
+            (PortKind::Request, PortDirection::Output) => "New request",
         };
         let id = self.run(None, |s| {
             let result = add_port(
                 &s.document,
                 module_id,
                 direction,
-                AddPortOptions { name: name.into(), ..Default::default() },
+                AddPortOptions { name: name.into(), kind, ..Default::default() },
             )?;
             Ok((result.document, result.id, None))
         })?;

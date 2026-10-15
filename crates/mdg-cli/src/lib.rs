@@ -73,6 +73,8 @@ pub fn run_cli(argv: &[String], io: &mut dyn CliIo) -> i32 {
         Action::PortRemove => edit::port_remove(&mut ctx, &parsed),
         Action::PortRename => edit::port_rename(&mut ctx, &parsed),
         Action::PortSetDescription => edit::port_set_description(&mut ctx, &parsed),
+        Action::PortSetResponse => edit::port_set_response(&mut ctx, &parsed),
+        Action::PortSetKind => edit::port_set_kind(&mut ctx, &parsed),
         Action::Connect => edit::connect(&mut ctx, &parsed),
         Action::Disconnect => edit::disconnect(&mut ctx, &parsed),
     };

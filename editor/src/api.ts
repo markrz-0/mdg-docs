@@ -8,11 +8,25 @@ import { invoke } from '@tauri-apps/api/core';
 
 export type PortDirection = 'input' | 'output';
 
+/**
+ * `event`: one-way message (outputs emit, inputs listen).
+ * `request`: a request answered over the same connection (outputs send it,
+ * inputs handle it).
+ */
+export type PortKind = 'event' | 'request';
+
 export interface Port {
   id: string;
   name: string;
+  /** Omitted for event ports. */
+  kind?: PortKind;
+  /** For a request port: the request contract. */
   description: string;
+  /** Request ports only; omitted when empty. */
+  response?: string;
 }
+
+export const portKind = (port: Port): PortKind => port.kind ?? 'event';
 
 export interface Endpoint {
   moduleId: string;
@@ -130,8 +144,13 @@ export const commands = {
     invoke<View>('rename_port_cmd', { moduleId, portId, name }),
   setPortDescription: (moduleId: string, portId: string, text: string) =>
     invoke<View>('set_port_description', { moduleId, portId, text }),
+  setPortResponse: (moduleId: string, portId: string, text: string) =>
+    invoke<View>('set_port_response', { moduleId, portId, text }),
+  setPortKind: (moduleId: string, portId: string, kind: PortKind) =>
+    invoke<View>('set_port_kind_cmd', { moduleId, portId, kind }),
   addChildModule: () => invoke<View>('add_child_module'),
-  addPort: (moduleId: string, direction: PortDirection) => invoke<View>('add_port', { moduleId, direction }),
+  addPort: (moduleId: string, direction: PortDirection, kind: PortKind) =>
+    invoke<View>('add_port', { moduleId, direction, kind }),
   connect: (from: Endpoint, to: Endpoint) => invoke<View>('connect', { from, to }),
   deleteModule: (moduleId: string, cascade: boolean) => invoke<View>('delete_module', { moduleId, cascade }),
   deletePort: (moduleId: string, portId: string, cascade: boolean) =>

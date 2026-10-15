@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use mdg_core::{
-    rename_module, rename_port, update_metadata, update_module_description, update_port_description, Endpoint,
-    PortDirection, Position,
+    rename_module, rename_port, set_port_kind, update_metadata, update_module_description, update_port_description,
+    update_port_response, Endpoint, PortDirection, PortKind, Position,
 };
 use mdg_session::{ConnectRole, RouteChoices, RouteMode, RoutePreview, RouteRequest, Selection, Session, View};
 use serde::{Deserialize, Serialize};
@@ -141,6 +141,21 @@ fn set_port_description(state: Shared<'_>, module_id: String, port_id: String, t
 }
 
 #[tauri::command]
+fn set_port_response(state: Shared<'_>, module_id: String, port_id: String, text: String) -> View {
+    let key = format!("response:{module_id}:{port_id}");
+    with(&state, |s| {
+        s.apply(Some(&key), |d| update_port_response(d, &module_id, &port_id, &text));
+    })
+}
+
+#[tauri::command]
+fn set_port_kind_cmd(state: Shared<'_>, module_id: String, port_id: String, kind: PortKind) -> View {
+    with(&state, |s| {
+        s.apply(None, |d| set_port_kind(d, &module_id, &port_id, kind));
+    })
+}
+
+#[tauri::command]
 fn add_child_module(state: Shared<'_>) -> View {
     with(&state, |s| {
         s.add_child_module(None);
@@ -148,9 +163,9 @@ fn add_child_module(state: Shared<'_>) -> View {
 }
 
 #[tauri::command]
-fn add_port(state: Shared<'_>, module_id: String, direction: PortDirection) -> View {
+fn add_port(state: Shared<'_>, module_id: String, direction: PortDirection, kind: PortKind) -> View {
     with(&state, |s| {
-        s.add_module_port(&module_id, direction);
+        s.add_module_port(&module_id, direction, kind);
     })
 }
 
@@ -255,6 +270,8 @@ pub fn run() {
             set_module_description,
             rename_port_cmd,
             set_port_description,
+            set_port_response,
+            set_port_kind_cmd,
             add_child_module,
             add_port,
             connect,

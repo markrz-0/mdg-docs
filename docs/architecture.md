@@ -9,7 +9,7 @@ crates/
 editor/         the desktop editor (Tauri 2)
   src-tauri/    Rust: Tauri commands wrapping an mdg-session Session
   src/          React + React Flow UI that renders the session's View
-examples/       authentication.mdg (byte-identical with the TypeScript original)
+examples/       authentication.mdg (schema 1.1 reference example)
 scripts/        gen-golden.mjs (records the CLI golden corpus)
 ```
 

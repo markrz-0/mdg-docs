@@ -13,7 +13,7 @@ Two versions are tracked independently:
 | Version | Where | Controls | Current |
 |---|---|---|---|
 | Container version | header bytes 4–7 | binary layout | `1.0` |
-| Schema version | index `schemaVersion` | data model | `1.0.0` |
+| Schema version | index `schemaVersion` | data model | `1.1.0` (`1.0.0` without request ports) |
 
 Readers reject an unknown **container major** and an unknown **schema major**
 with an explicit "unsupported version" error. Nothing is reinterpreted
@@ -74,8 +74,32 @@ rejected, so files stay readable by JavaScript implementations.
   direct children. Port direction is never stored: it comes from whether the
   port is listed in `inputs` or `outputs`.
 - `content` maps content IDs to absolute byte ranges. Content IDs are
-  `module/<moduleId>` and `port/<moduleId>/<portId>`. They are unambiguous
+  `module/<moduleId>`, `port/<moduleId>/<portId>` and, for a request port's
+  response, `port/<moduleId>/<portId>/response`. They are unambiguous
   because IDs cannot contain `/` or `:`.
+
+### Port kinds (schema 1.1)
+
+A port record may carry `"kind"`: `"event"` (the default, normally omitted)
+or `"request"`. A request port also has a `responseRef` to its response
+contract; `descriptionRef` holds the request contract. An event port must
+not have a `responseRef`.
+
+```json
+{ "id": "validate-token", "name": "Validate Token", "kind": "request",
+  "descriptionRef": "port/api-service/validate-token",
+  "responseRef": "port/api-service/validate-token/response" }
+```
+
+A request port in `outputs` sends the request (the caller); one in `inputs`
+handles it (the handler). A connection between request ports runs from
+caller to handler and carries the response back implicitly. Both ends of a
+connection must be the same kind (`PORT_KIND_MISMATCH` otherwise).
+
+Writers emit `schemaVersion` `1.1.0` when a document has a request port, and
+keep the document's version otherwise. Event-only documents therefore stay
+`1.0.0` and byte-identical with schema 1.0 writers. A 1.0 reader rejects
+`kind` and `responseRef` as unknown fields rather than misreading them.
 - `layout` is optional presentation metadata with no effect on message-flow
   semantics; validation ignores it. `positions` holds each module's position
   in its parent's canvas. The optional `boundaries` holds, per module, the
@@ -104,7 +128,8 @@ Writing an unchanged document always produces identical bytes:
 - modules (index order and block order) are sorted by module ID in
   UTF-16 code-unit order;
 - each module's blocks are ordered: description, inputs (stored order),
-  outputs (stored order);
+  outputs (stored order), each request port's response directly after its
+  description;
 - ports, `childIds` and connections keep their stored order;
 - layout positions, unknown metadata and extension keys are sorted by key;
   nested extension objects are written with sorted keys;
@@ -113,7 +138,7 @@ Writing an unchanged document always produces identical bytes:
 The index is written exactly like JavaScript's `JSON.stringify`: no
 whitespace, numbers in JavaScript's shortest form (`380`, not `380.0`), and
 object keys in JavaScript enumeration order (keys that are canonical
-integers, such as a module ID `10`, come first in ascending order). Files
+integers, such as a module ID `10`, come first in ascending order). Files without request ports
 written by this implementation and by the original TypeScript one are
 byte-identical.
 

@@ -75,6 +75,35 @@ impl Builder {
         self
     }
 
+    /// A request port the module handles, with "<id> request/response" contracts.
+    pub fn handles(self, module_id: &str, id: &str) -> Self {
+        self.request_port(PortDirection::Input, module_id, id)
+    }
+
+    /// A request port the module sends, with "<id> request/response" contracts.
+    pub fn calls(self, module_id: &str, id: &str) -> Self {
+        self.request_port(PortDirection::Output, module_id, id)
+    }
+
+    fn request_port(mut self, direction: PortDirection, module_id: &str, id: &str) -> Self {
+        self.doc = add_port(
+            &self.doc,
+            module_id,
+            direction,
+            AddPortOptions {
+                id: Some(id.into()),
+                name: id.into(),
+                kind: PortKind::Request,
+                description: Some(format!("{id} request")),
+                response: Some(format!("{id} response")),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .document;
+        self
+    }
+
     pub fn connect(mut self, id: &str, from: &str, to: &str) -> Self {
         self.doc = add_connection(
             &self.doc,

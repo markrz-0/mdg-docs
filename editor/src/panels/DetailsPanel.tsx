@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { commands, type Module, type Port, type PortDirection } from '../api';
+import { commands, portKind, type Module, type Port, type PortDirection, type PortKind } from '../api';
 import { CommitInput } from '../components/CommitInput';
 import { run, useEditor } from '../state/store';
 import { MarkdownField } from './MarkdownField';
@@ -12,19 +12,34 @@ function findPort(module: Module, portId: string): { port: Port; direction: Port
   return output ? { port: output, direction: 'output' } : null;
 }
 
+/** What a request port means on this side of the exchange. */
+const requestRole = (direction: PortDirection) => (direction === 'input' ? 'handles requests' : 'sends requests');
+
 function PortList({ module, direction }: { module: Module; direction: PortDirection }) {
   const ports = direction === 'input' ? module.inputs : module.outputs;
+  const add = (kind: PortKind) => void run(commands.addPort(module.id, direction, kind));
   return (
     <section className="field">
       <div className="field-header">
         <span className="field-label">{direction === 'input' ? 'Inputs' : 'Outputs'}</span>
-        <button
-          className="small"
-          onClick={() => void run(commands.addPort(module.id, direction))}
-          data-testid={`add-${direction}`}
-        >
-          + {direction === 'input' ? 'Input' : 'Output'}
-        </button>
+        <span className="actions-inline">
+          <button
+            className="small"
+            onClick={() => add('event')}
+            data-testid={`add-${direction}`}
+            title={direction === 'input' ? 'Listens for an event' : 'Emits an event'}
+          >
+            + Event
+          </button>
+          <button
+            className="small request"
+            onClick={() => add('request')}
+            data-testid={`add-${direction}-request`}
+            title={direction === 'input' ? 'Handles a request and returns a response' : 'Sends a request and receives a response'}
+          >
+            + Request
+          </button>
+        </span>
       </div>
       {ports.length === 0 && <p className="muted">None.</p>}
       <ul className="port-list">
@@ -37,6 +52,11 @@ function PortList({ module, direction }: { module: Module; direction: PortDirect
               {p.name}
             </button>{' '}
             <code>{p.id}</code>
+            {portKind(p) === 'request' ? (
+              <span className="kind-badge">⇄ {requestRole(direction)}</span>
+            ) : (
+              <span className="kind-badge event">→ event</span>
+            )}
           </li>
         ))}
       </ul>
@@ -112,9 +132,21 @@ function PortDetails({ module, port, direction }: { module: Module; port: Port; 
   const connections = useEditor((s) => s.view.details.portConnections ?? 0);
   const [cascade, setCascade] = useState(false);
   const [routing, setRouting] = useState(false);
+  const kind = portKind(port);
+  const title =
+    kind === 'request'
+      ? direction === 'input'
+        ? 'Request port (handled here)'
+        : 'Request port (sent from here)'
+      : direction === 'input'
+        ? 'Input port'
+        : 'Output port';
+  const setKind = (next: PortKind) => {
+    if (next !== kind) void run(commands.setPortKind(module.id, port.id, next));
+  };
   return (
     <div data-testid="port-details">
-      <h2 className="panel-title">{direction === 'input' ? 'Input port' : 'Output port'}</h2>
+      <h2 className="panel-title">{title}</h2>
       <div className="field">
         <span className="field-label">Module</span>
         <button className="link" onClick={() => void run(commands.select({ kind: 'module', moduleId: module.id }))}>
@@ -135,13 +167,47 @@ function PortDetails({ module, port, direction }: { module: Module; port: Port; 
         <code>{port.id}</code>
       </div>
       <div className="field">
-        <span className="field-label">Contract (Markdown)</span>
+        <span className="field-label">Kind</span>
+        <div
+          className="segmented kind-toggle"
+          title={connections > 0 ? 'Disconnect the port to change its kind: both ends of a connection must match.' : undefined}
+        >
+          <button
+            className={kind === 'event' ? 'active' : ''}
+            disabled={connections > 0 && kind !== 'event'}
+            onClick={() => setKind('event')}
+            data-testid="port-kind-event"
+          >
+            Event
+          </button>
+          <button
+            className={`request${kind === 'request' ? ' active' : ''}`}
+            disabled={connections > 0 && kind !== 'request'}
+            onClick={() => setKind('request')}
+            data-testid="port-kind-request"
+          >
+            ⇄ Request / response
+          </button>
+        </div>
+      </div>
+      <div className="field">
+        <span className="field-label">{kind === 'request' ? 'Request (Markdown)' : 'Contract (Markdown)'}</span>
         <MarkdownField
           value={port.description}
           onChange={(text) => void run(commands.setPortDescription(module.id, port.id, text))}
           testId="port-description"
         />
       </div>
+      {kind === 'request' && (
+        <div className="field">
+          <span className="field-label">Response (Markdown)</span>
+          <MarkdownField
+            value={port.response ?? ''}
+            onChange={(text) => void run(commands.setPortResponse(module.id, port.id, text))}
+            testId="port-response"
+          />
+        </div>
+      )}
       <p className="muted">Used by {connections} connection(s).</p>
       <div className="actions">
         <button onClick={() => setRouting(true)} data-testid="route-port" title="Connect to a port on another hierarchy level">

@@ -13,58 +13,37 @@
         "childIds": [
           "frontend",
           "api-service",
-          "jwt-validator"
+          "jwt-validator",
+          "audit-log"
         ],
         "connections": [
           {
             "id": "root-login",
             "from": {
               "moduleId": "frontend",
-              "portId": "login-submitted"
+              "portId": "login"
             },
             "to": {
               "moduleId": "api-service",
-              "portId": "login-request"
-            }
-          },
-          {
-            "id": "root-login-response",
-            "from": {
-              "moduleId": "api-service",
-              "portId": "login-response"
-            },
-            "to": {
-              "moduleId": "frontend",
-              "portId": "session-established"
+              "portId": "login"
             }
           },
           {
             "id": "root-profile",
             "from": {
               "moduleId": "frontend",
-              "portId": "profile-requested"
+              "portId": "get-profile"
             },
             "to": {
               "moduleId": "api-service",
-              "portId": "profile-request"
-            }
-          },
-          {
-            "id": "root-profile-response",
-            "from": {
-              "moduleId": "api-service",
-              "portId": "profile-response"
-            },
-            "to": {
-              "moduleId": "frontend",
-              "portId": "profile-received"
+              "portId": "get-profile"
             }
           },
           {
             "id": "root-validate-token",
             "from": {
               "moduleId": "api-service",
-              "portId": "token-validation-request"
+              "portId": "validate-token"
             },
             "to": {
               "moduleId": "jwt-validator",
@@ -72,14 +51,14 @@
             }
           },
           {
-            "id": "root-validation-result",
+            "id": "root-security-event",
             "from": {
-              "moduleId": "jwt-validator",
-              "portId": "validation-result"
+              "moduleId": "api-service",
+              "portId": "security-event"
             },
             "to": {
-              "moduleId": "api-service",
-              "portId": "token-validation-result"
+              "moduleId": "audit-log",
+              "portId": "security-event"
             }
           }
         ]
@@ -89,28 +68,21 @@
         "parentId": "application",
         "name": "Frontend",
         "description": "Single-page browser application.\n\n- Renders the login form and the user profile page.\n- Stores the session token in memory only (never in `localStorage`).",
-        "inputs": [
-          {
-            "id": "session-established",
-            "name": "Session Established",
-            "description": "Receives the login outcome: a signed JWT on success, or an error message on failure."
-          },
-          {
-            "id": "profile-received",
-            "name": "Profile Received",
-            "description": "Receives the user profile, or `401 Unauthorized` when the token was rejected."
-          }
-        ],
+        "inputs": [],
         "outputs": [
           {
-            "id": "login-submitted",
-            "name": "Login Submitted",
-            "description": "Emits `POST /login` with a username and password typed by the user."
+            "id": "login",
+            "name": "Log In",
+            "kind": "request",
+            "description": "Sends `POST /login` with a username and password typed by the user.",
+            "response": "A signed JWT on success, or an error message on failure."
           },
           {
-            "id": "profile-requested",
-            "name": "Profile Requested",
-            "description": "Emits `GET /profile` with the session token in the `Authorization` header."
+            "id": "get-profile",
+            "name": "Get Profile",
+            "kind": "request",
+            "description": "Sends `GET /profile` with the session token in the `Authorization` header.",
+            "response": "The user profile, or `401 Unauthorized` when the token was rejected."
           }
         ],
         "childIds": [],
@@ -123,36 +95,32 @@
         "description": "HTTP API exposed to the frontend.\n\nDelegates authentication to its **Authentication** submodule and serves\nprotected resources through **User Routes**. Token validation is\ndelegated to the shared **JWT Validator** outside this service.",
         "inputs": [
           {
-            "id": "login-request",
-            "name": "Login Request",
-            "description": "Receives `POST /login` requests containing user credentials."
+            "id": "login",
+            "name": "Login",
+            "kind": "request",
+            "description": "`POST /login` with user credentials.",
+            "response": "A JWT on success, or `401` with a reason."
           },
           {
-            "id": "profile-request",
-            "name": "Profile Request",
-            "description": "Receives `GET /profile` requests carrying a bearer token."
-          },
-          {
-            "id": "token-validation-result",
-            "name": "Token Validation Result",
-            "description": "Receives the verdict for a previously sent token validation request."
+            "id": "get-profile",
+            "name": "Get Profile",
+            "kind": "request",
+            "description": "`GET /profile` carrying a bearer token.",
+            "response": "The profile document, or `401` when the token is invalid."
           }
         ],
         "outputs": [
           {
-            "id": "login-response",
-            "name": "Login Response",
-            "description": "Emits the login outcome: a JWT on success or `401` with a reason."
+            "id": "validate-token",
+            "name": "Validate Token",
+            "kind": "request",
+            "description": "A bearer token that must be verified before a protected resource is served.",
+            "response": "`valid` with the token claims, or `invalid` with a reason."
           },
           {
-            "id": "profile-response",
-            "name": "Profile Response",
-            "description": "Emits the profile document, or `401` when the token is invalid."
-          },
-          {
-            "id": "token-validation-request",
-            "name": "Token Validation Request",
-            "description": "Emits a bearer token that must be verified before a protected resource is served."
+            "id": "security-event",
+            "name": "Security Event",
+            "description": "Emits security-relevant events raised inside the service, such as failed logins."
           }
         ],
         "childIds": [
@@ -164,22 +132,33 @@
             "id": "api-login",
             "from": {
               "moduleId": "api-service",
-              "portId": "login-request"
+              "portId": "login"
             },
             "to": {
               "moduleId": "authentication",
-              "portId": "login-request"
+              "portId": "login"
             }
           },
           {
-            "id": "api-token-issued",
+            "id": "api-profile",
             "from": {
-              "moduleId": "authentication",
-              "portId": "token-issued"
+              "moduleId": "api-service",
+              "portId": "get-profile"
+            },
+            "to": {
+              "moduleId": "user-routes",
+              "portId": "get-profile"
+            }
+          },
+          {
+            "id": "api-validate-token",
+            "from": {
+              "moduleId": "user-routes",
+              "portId": "validate-token"
             },
             "to": {
               "moduleId": "api-service",
-              "portId": "login-response"
+              "portId": "validate-token"
             }
           },
           {
@@ -190,51 +169,7 @@
             },
             "to": {
               "moduleId": "api-service",
-              "portId": "login-response"
-            }
-          },
-          {
-            "id": "api-profile",
-            "from": {
-              "moduleId": "api-service",
-              "portId": "profile-request"
-            },
-            "to": {
-              "moduleId": "user-routes",
-              "portId": "profile-request"
-            }
-          },
-          {
-            "id": "api-profile-response",
-            "from": {
-              "moduleId": "user-routes",
-              "portId": "profile-response"
-            },
-            "to": {
-              "moduleId": "api-service",
-              "portId": "profile-response"
-            }
-          },
-          {
-            "id": "api-validate-token",
-            "from": {
-              "moduleId": "user-routes",
-              "portId": "token-validation-request"
-            },
-            "to": {
-              "moduleId": "api-service",
-              "portId": "token-validation-request"
-            }
-          },
-          {
-            "id": "api-validation-result",
-            "from": {
-              "moduleId": "api-service",
-              "portId": "token-validation-result"
-            },
-            "to": {
-              "moduleId": "user-routes",
-              "portId": "token-validation-result"
+              "portId": "security-event"
             }
           }
         ]
@@ -248,16 +183,28 @@
           {
             "id": "validate-token",
             "name": "Validate Token",
-            "description": "Receives a raw bearer token to verify."
+            "kind": "request",
+            "description": "A raw bearer token to verify.",
+            "response": "`valid` with the token claims, or `invalid` with a reason (expired, bad signature, malformed)."
           }
         ],
-        "outputs": [
+        "outputs": [],
+        "childIds": [],
+        "connections": []
+      },
+      "audit-log": {
+        "id": "audit-log",
+        "parentId": "application",
+        "name": "Audit Log",
+        "description": "Append-only log of security-relevant events.\n\nNothing waits for it, so it only listens to events.",
+        "inputs": [
           {
-            "id": "validation-result",
-            "name": "Validation Result",
-            "description": "Emits `valid` with the token claims, or `invalid` with a reason (expired, bad signature, malformed)."
+            "id": "security-event",
+            "name": "Security Event",
+            "description": "Receives a security-relevant event with a timestamp and the client address."
           }
         ],
+        "outputs": [],
         "childIds": [],
         "connections": []
       },
@@ -268,21 +215,18 @@
         "description": "Turns a set of credentials into a signed session token.",
         "inputs": [
           {
-            "id": "login-request",
-            "name": "Login Request",
-            "description": "Receives credentials from `POST /login`."
+            "id": "login",
+            "name": "Login",
+            "kind": "request",
+            "description": "Credentials from `POST /login`.",
+            "response": "A signed JWT, or a rejection when the credentials are wrong or the account is locked."
           }
         ],
         "outputs": [
           {
-            "id": "token-issued",
-            "name": "Token Issued",
-            "description": "Emits a signed JWT."
-          },
-          {
             "id": "login-failed",
             "name": "Login Failed",
-            "description": "Emits a rejection when the credentials are wrong or the account is locked."
+            "description": "Emits the username and the reason whenever a login is rejected."
           }
         ],
         "childIds": [
@@ -294,7 +238,7 @@
             "id": "auth-check",
             "from": {
               "moduleId": "authentication",
-              "portId": "login-request"
+              "portId": "login"
             },
             "to": {
               "moduleId": "credential-validator",
@@ -305,7 +249,7 @@
             "id": "auth-issue",
             "from": {
               "moduleId": "credential-validator",
-              "portId": "credentials-valid"
+              "portId": "issue-token"
             },
             "to": {
               "moduleId": "token-issuer",
@@ -313,21 +257,10 @@
             }
           },
           {
-            "id": "auth-token",
-            "from": {
-              "moduleId": "token-issuer",
-              "portId": "token-issued"
-            },
-            "to": {
-              "moduleId": "authentication",
-              "portId": "token-issued"
-            }
-          },
-          {
             "id": "auth-failed",
             "from": {
               "moduleId": "credential-validator",
-              "portId": "credentials-invalid"
+              "portId": "credentials-rejected"
             },
             "to": {
               "moduleId": "authentication",
@@ -343,26 +276,20 @@
         "description": "Routes for user-owned resources. Every route requires a valid token.",
         "inputs": [
           {
-            "id": "profile-request",
-            "name": "Profile Request",
-            "description": "Receives `GET /profile` requests."
-          },
-          {
-            "id": "token-validation-result",
-            "name": "Token Validation Result",
-            "description": "Receives the verdict for a token sent out for validation."
+            "id": "get-profile",
+            "name": "Get Profile",
+            "kind": "request",
+            "description": "`GET /profile` requests.",
+            "response": "The profile, or a `401` response."
           }
         ],
         "outputs": [
           {
-            "id": "profile-response",
-            "name": "Profile Response",
-            "description": "Emits the profile or a `401` response."
-          },
-          {
-            "id": "token-validation-request",
-            "name": "Token Validation Request",
-            "description": "Emits a bearer token that needs verification."
+            "id": "validate-token",
+            "name": "Validate Token",
+            "kind": "request",
+            "description": "A bearer token that needs verification.",
+            "response": "The validation verdict for the token."
           }
         ],
         "childIds": [
@@ -370,47 +297,25 @@
         ],
         "connections": [
           {
-            "id": "routes-request",
+            "id": "routes-profile",
             "from": {
               "moduleId": "user-routes",
-              "portId": "profile-request"
+              "portId": "get-profile"
             },
             "to": {
               "moduleId": "protected-endpoint",
-              "portId": "http-request"
-            }
-          },
-          {
-            "id": "routes-response",
-            "from": {
-              "moduleId": "protected-endpoint",
-              "portId": "http-response"
-            },
-            "to": {
-              "moduleId": "user-routes",
-              "portId": "profile-response"
+              "portId": "get-profile"
             }
           },
           {
             "id": "routes-validate-token",
             "from": {
               "moduleId": "protected-endpoint",
-              "portId": "token-validation-request"
+              "portId": "validate-token"
             },
             "to": {
               "moduleId": "user-routes",
-              "portId": "token-validation-request"
-            }
-          },
-          {
-            "id": "routes-validation-result",
-            "from": {
-              "moduleId": "user-routes",
-              "portId": "token-validation-result"
-            },
-            "to": {
-              "moduleId": "protected-endpoint",
-              "portId": "token-validation-result"
+              "portId": "validate-token"
             }
           }
         ]
@@ -419,24 +324,28 @@
         "id": "credential-validator",
         "parentId": "authentication",
         "name": "Credential Validator",
-        "description": "Checks a username/password pair against the user store.\n\nPasswords are compared using a constant-time hash comparison.",
+        "description": "Checks a username/password pair against the user store and, when it\nmatches, asks the **Token Issuer** for a session token.\n\nPasswords are compared using a constant-time hash comparison.",
         "inputs": [
           {
             "id": "check-credentials",
             "name": "Check Credentials",
-            "description": "Receives a username and password."
+            "kind": "request",
+            "description": "A username and password.",
+            "response": "A signed JWT for the authenticated user, or a rejection reason."
           }
         ],
         "outputs": [
           {
-            "id": "credentials-valid",
-            "name": "Credentials Valid",
-            "description": "Emits the authenticated user ID."
+            "id": "issue-token",
+            "name": "Issue Token",
+            "kind": "request",
+            "description": "The authenticated user ID.",
+            "response": "A signed JWT for that user."
           },
           {
-            "id": "credentials-invalid",
-            "name": "Credentials Invalid",
-            "description": "Emits a rejection reason."
+            "id": "credentials-rejected",
+            "name": "Credentials Rejected",
+            "description": "Emits the username and the reason when the credentials are wrong or the account is locked."
           }
         ],
         "childIds": [],
@@ -451,16 +360,12 @@
           {
             "id": "issue-token",
             "name": "Issue Token",
-            "description": "Receives an authenticated user ID."
+            "kind": "request",
+            "description": "An authenticated user ID.",
+            "response": "The signed JWT."
           }
         ],
-        "outputs": [
-          {
-            "id": "token-issued",
-            "name": "Token Issued",
-            "description": "Emits the signed JWT."
-          }
-        ],
+        "outputs": [],
         "childIds": [],
         "connections": []
       },
@@ -468,29 +373,23 @@
         "id": "protected-endpoint",
         "parentId": "user-routes",
         "name": "Protected Endpoint",
-        "description": "Serves `GET /profile`.\n\n1. Extracts the bearer token from the request.\n2. Sends it out for validation.\n3. When the validation result is `valid`, loads and returns the profile;\n   otherwise responds with `401 Unauthorized`.\n\nThe numbered steps describe behaviour; MDG connections themselves do not\nimply any ordering.",
+        "description": "Serves `GET /profile`.\n\n1. Extracts the bearer token from the request.\n2. Asks for the token to be validated and waits for the verdict.\n3. When the verdict is `valid`, loads and returns the profile;\n   otherwise responds with `401 Unauthorized`.\n\nThe numbered steps describe behaviour; MDG connections themselves do not\nimply any ordering.",
         "inputs": [
           {
-            "id": "http-request",
-            "name": "HTTP Request",
-            "description": "Receives `GET /profile` with a bearer token."
-          },
-          {
-            "id": "token-validation-result",
-            "name": "Token Validation Result",
-            "description": "Receives the validation verdict for the extracted token."
+            "id": "get-profile",
+            "name": "Get Profile",
+            "kind": "request",
+            "description": "`GET /profile` with a bearer token.",
+            "response": "The profile document, or `401 Unauthorized`."
           }
         ],
         "outputs": [
           {
-            "id": "token-validation-request",
-            "name": "Token Validation Request",
-            "description": "Emits the extracted bearer token for verification."
-          },
-          {
-            "id": "http-response",
-            "name": "HTTP Response",
-            "description": "Emits the profile document or `401 Unauthorized`."
+            "id": "validate-token",
+            "name": "Validate Token",
+            "kind": "request",
+            "description": "The extracted bearer token.",
+            "response": "The validation verdict for the token."
           }
         ],
         "childIds": [],
@@ -510,6 +409,10 @@
     "jwt-validator": {
       "x": 820.0,
       "y": 120.0
+    },
+    "audit-log": {
+      "x": 820.0,
+      "y": 320.0
     },
     "authentication": {
       "x": 0.0,

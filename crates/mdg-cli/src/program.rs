@@ -26,6 +26,8 @@ pub enum Action {
     PortRemove,
     PortRename,
     PortSetDescription,
+    PortSetResponse,
+    PortSetKind,
     Connect,
     Disconnect,
 }
@@ -46,6 +48,12 @@ fn with_description_options(command: Cmd) -> Cmd {
     command
         .option(Opt::new("--description <markdown>", "Markdown description"))
         .option(Opt::new("--description-file <path>", "read the Markdown description from a file (`-` for stdin)"))
+}
+
+fn with_response_options(command: Cmd) -> Cmd {
+    command
+        .option(Opt::new("--response <markdown>", "Markdown response contract (request ports)"))
+        .option(Opt::new("--response-file <path>", "read the Markdown response contract from a file (`-` for stdin)"))
 }
 
 fn inspect_commands(program: Cmd) -> Cmd {
@@ -235,17 +243,24 @@ fn module_commands() -> Cmd {
 fn port_commands() -> Cmd {
     Cmd::new("port", "Add, remove, rename or describe ports.")
         .command(
-            with_edit_options(with_description_options(
-                Cmd::new("add", "Add an input or output port to a module (not the root).")
-                    .argument("<file>", ".mdg file")
-                    .argument("<module-id>", "module ID")
-                    .option(Opt::new("--direction <direction>", "port direction").choices(&["input", "output"]).mandatory())
-                    .option(Opt::new("--name <name>", "port name").mandatory())
-                    .option(Opt::new("--id <id>", "explicit port ID, unique within the module (generated when omitted)")),
-            ))
+            with_edit_options(with_response_options(with_description_options(
+                Cmd::new(
+                    "add",
+                    "Add an input or output port to a module (not the root). An event port carries one-way messages; \
+                     a request port carries a request and its response (as an output it sends requests, as an input \
+                     it handles them).",
+                )
+                .argument("<file>", ".mdg file")
+                .argument("<module-id>", "module ID")
+                .option(Opt::new("--direction <direction>", "port direction").choices(&["input", "output"]).mandatory())
+                .option(Opt::new("--name <name>", "port name").mandatory())
+                .option(Opt::new("--kind <kind>", "event (default) or request/response").choices(&["event", "request"]))
+                .option(Opt::new("--id <id>", "explicit port ID, unique within the module (generated when omitted)")),
+            )))
             .help_after(examples(&[
                 "mdg port add architecture.mdg auth-001 --direction input --name \"Login Request\" --id login-request --description \"Receives POST /login.\"",
                 "mdg port add architecture.mdg auth-001 --direction output --name \"Token Issued\" --json",
+                "mdg port add architecture.mdg auth-001 --direction input --kind request --name \"Login\" --description \"POST /login with credentials.\" --response \"A JWT, or 401 with a reason.\"",
             ]))
             .action(Action::PortAdd),
         )
@@ -282,6 +297,33 @@ fn port_commands() -> Cmd {
                 "mdg port set-description architecture.mdg auth-001 token-issued --description \"Emits a signed JWT.\"",
             ]))
             .action(Action::PortSetDescription),
+        )
+        .command(
+            with_edit_options(with_response_options(
+                Cmd::new("set-response", "Replace a request port's Markdown response contract.")
+                    .argument("<file>", ".mdg file")
+                    .argument("<module-id>", "module ID")
+                    .argument("<port-id>", "port ID"),
+            ))
+            .help_after(examples(&[
+                "mdg port set-response architecture.mdg auth-001 login --response \"A signed JWT, or 401 with a reason.\"",
+            ]))
+            .action(Action::PortSetResponse),
+        )
+        .command(
+            with_edit_options(
+                Cmd::new(
+                    "set-kind",
+                    "Make a port an event port or a request/response port. The port must not be connected. \
+                     Switching to event drops the response contract.",
+                )
+                .argument("<file>", ".mdg file")
+                .argument("<module-id>", "module ID")
+                .argument("<port-id>", "port ID")
+                .argument("<kind>", "event or request"),
+            )
+            .help_after(examples(&["mdg port set-kind architecture.mdg auth-001 login request"]))
+            .action(Action::PortSetKind),
         )
 }
 

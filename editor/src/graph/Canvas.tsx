@@ -14,12 +14,20 @@ import {
   type OnConnectStart,
   type OnNodeDrag,
 } from '@xyflow/react';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { commands, queries, type Endpoint } from '../api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { commands, queries, type Endpoint, type PortKind } from '../api';
 import { boundaryKey } from '../state/layoutKeys';
 import { getView, run, useEditor } from '../state/store';
 import { layoutAll, layoutChildren, type Size } from './autoLayout';
-import { boundarySideOf, buildGraph, endpointNodeId, nodeToModuleId, type FlowNode } from './buildGraph';
+import {
+  boundarySideOf,
+  buildGraph,
+  endpointKind,
+  endpointNodeId,
+  kindColor,
+  nodeToModuleId,
+  type FlowNode,
+} from './buildGraph';
 import { nodeTypes } from './nodes';
 
 function toEndpoints(connection: Connection | Edge, currentModuleId: string): { from: Endpoint; to: Endpoint } | null {
@@ -72,12 +80,15 @@ function ModuleCanvas({ currentModuleId }: { currentModuleId: string }) {
   // edit would reject. Until the answer arrives (a very fast drag), drops are
   // allowed: `connect` validates again and reports a rejection as an error.
   const partners = useRef<{ from: 'source' | 'target'; keys: Set<string> } | null>(null);
+  // The line being dragged takes the colour of the port it starts from.
+  const [dragKind, setDragKind] = useState<PortKind>('event');
 
   const onConnectStart: OnConnectStart = useCallback(
     (_event, { nodeId, handleId, handleType }) => {
       partners.current = null;
       if (!nodeId || !handleId || !handleType) return;
       const endpoint = { moduleId: nodeToModuleId(nodeId, currentModuleId), portId: handleId };
+      setDragKind(endpointKind(getView().document, endpoint));
       const otherRole = handleType === 'source' ? 'target' : 'source';
       void queries.connectionPartners(endpoint, handleType).then((list) => {
         const keys = new Set(list.map((ep) => handleKey(endpointNodeId(ep, currentModuleId, otherRole), ep.portId)));
@@ -141,6 +152,7 @@ function ModuleCanvas({ currentModuleId }: { currentModuleId: string }) {
         onNodesChange={onNodesChange}
         onNodeDragStop={onNodeDragStop}
         onConnectStart={onConnectStart}
+        connectionLineStyle={{ stroke: kindColor(dragKind) }}
         onConnect={onConnect}
         isValidConnection={isValidConnection}
         onNodeClick={onNodeClick}

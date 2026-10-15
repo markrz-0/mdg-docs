@@ -87,6 +87,32 @@ mdg connect arch.mdg cart:ready checkout:start [--id c1]
 mdg disconnect arch.mdg c1
 ```
 
+### Event and request/response ports
+
+A port is an **event** port (the default) or a **request/response** port.
+An event output emits a one-way message and an event input listens for it.
+A request output *sends* a request and an input *handles* it. The single
+connection runs from caller to handler, and the response travels back over
+it, so one exchange needs one connection, not two. A request port has two
+contracts: the request (its description) and the response.
+
+```sh
+mdg port add arch.mdg web --direction output --kind request --name "Get Cart" --id get-cart \
+  --description "GET /cart with the session cookie." --response "The cart, or 404."
+mdg port add arch.mdg cart --direction input --kind request --name "Get Cart" --id get-cart \
+  --description "GET /cart." --response-file cart-response.md
+mdg connect arch.mdg web:get-cart cart:get-cart
+mdg port set-response arch.mdg cart get-cart --response "..."
+mdg port set-kind arch.mdg cart ready request     # the port must not be connected
+```
+
+Both ends of a connection must be the same kind, and routing (`--route`)
+creates boundary ports of the routed kind. A caller may connect to several
+handlers, just as an event may reach several listeners. `inputs`, `outputs`,
+`describe` and `export` show a request port's contracts under **Request**
+and **Response** headings. In `--json` output, a request port has
+`"kind": "request"` and a `response` field.
+
 ### Cross-level connections
 
 Stored connections are always local. To connect ports at different depths,

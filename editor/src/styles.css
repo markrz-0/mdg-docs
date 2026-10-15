@@ -6,6 +6,9 @@
   --muted: #6b7385;
   --accent: #3b6fd8;
   --accent-soft: #e6eefc;
+  /* Request/response ports and connections (events use --accent). */
+  --request: #23884a;
+  --request-soft: #e2f4e8;
   --danger: #c43b3b;
   --ok: #2a8a4a;
   --node: #ffffff;
@@ -29,6 +32,8 @@
     --muted: #8d95a7;
     --accent: #6d9cf5;
     --accent-soft: #23314d;
+    --request: #57c27c;
+    --request-soft: #1d3a29;
     --danger: #ef6d6d;
     --ok: #57c27c;
     --node: #232833;
@@ -504,11 +509,51 @@ code {
   stroke-width: 2.5;
 }
 
+/* Request/response connections highlight green instead of blue. */
+.react-flow__edge.request.highlighted .react-flow__edge-path,
+.react-flow__edge.request.selected .react-flow__edge-path {
+  stroke: var(--request);
+}
+
 .react-flow__handle {
   width: 9px;
   height: 9px;
   background: var(--panel);
   border: 2px solid var(--accent);
+}
+
+.react-flow__handle.mdg-handle-request {
+  border-color: var(--request);
+}
+
+.port-label.request:hover,
+.port-label.request.selected {
+  background: var(--request-soft);
+  color: var(--request);
+}
+
+/* Port kind marker: → for events (blue), ⇄ for requests (green). */
+.port-kind {
+  color: var(--accent);
+  margin-right: 4px;
+}
+
+.port-label.request .port-kind {
+  color: var(--request);
+}
+
+.kind-badge {
+  font-size: 10px;
+  border-radius: 8px;
+  padding: 0 6px;
+  margin-left: 6px;
+  background: var(--request-soft);
+  color: var(--request);
+}
+
+.kind-badge.event {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 button:disabled {
@@ -584,6 +629,29 @@ button:disabled {
   background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.segmented.kind-toggle {
+  margin: 0;
+}
+
+.segmented button.request.active {
+  background: var(--request-soft);
+  border-color: var(--request);
+  color: var(--request);
+}
+
+.actions-inline {
+  display: inline-flex;
+  gap: 4px;
+}
+
+button.request {
+  color: var(--request);
+}
+
+button.request:hover {
+  border-color: var(--request);
 }
 
 .route-ends {

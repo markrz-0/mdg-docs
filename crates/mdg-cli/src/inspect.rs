@@ -5,9 +5,9 @@ use std::path::Path;
 
 use mdg_core::{
     build_tree, count_connections, count_ports, describe_connection, describe_module, describe_module_ids,
-    export_document_markdown, export_module_files, format_endpoint, get_module, js, read_mdg, render_describe_markdown,
-    render_tree, trace, validate_document, MdgError, PortDirection, Result, TraceDirection, TraceOptions, TraceResult,
-    TraceRouteEnd, TreeOptions, ValidationIssue, ValidationOptions,
+    export_document_markdown, export_module_files, format_endpoint, get_module, js, port_description, read_mdg,
+    render_describe_markdown, render_tree, request_role, trace, validate_document, MdgError, PortDirection, Result,
+    TraceDirection, TraceOptions, TraceResult, TraceRouteEnd, TreeOptions, ValidationIssue, ValidationOptions,
 };
 use serde::Serialize;
 
@@ -98,18 +98,12 @@ pub fn describe(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
 
 pub fn ports(ctx: &mut Context<'_>, p: &Args, direction: PortDirection) -> Result<()> {
     #[derive(Serialize)]
-    struct PortJson {
-        id: String,
-        name: String,
-        description: String,
-    }
-    #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct PortsJson {
         module_id: String,
         module_name: String,
         direction: &'static str,
-        ports: Vec<PortJson>,
+        ports: Vec<mdg_core::PortDescription>,
     }
     let mut module_id = String::new();
     let read = read_partial(&p.args[0], |skeleton| {
@@ -117,11 +111,7 @@ pub fn ports(ctx: &mut Context<'_>, p: &Args, direction: PortDirection) -> Resul
         Ok(vec![module_id.clone()])
     })?;
     let module = get_module(&read.doc, &module_id)?;
-    let ports: Vec<PortJson> = module
-        .ports(direction)
-        .iter()
-        .map(|port| PortJson { id: port.id.clone(), name: port.name.clone(), description: port.description.clone() })
-        .collect();
+    let ports: Vec<mdg_core::PortDescription> = module.ports(direction).iter().map(port_description).collect();
     let plural = match direction {
         PortDirection::Input => "inputs",
         PortDirection::Output => "outputs",
@@ -138,15 +128,31 @@ pub fn ports(ctx: &mut Context<'_>, p: &Args, direction: PortDirection) -> Resul
     if ports.is_empty() {
         lines.push("_None._".to_string());
     }
+    let body = |text: &str| {
+        let trimmed = js::trim(text);
+        if trimmed.is_empty() {
+            "_No description._".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    };
     for port in &ports {
-        let body = js::trim(&port.description);
-        lines.extend([
-            format!("## {}", port.name),
-            format!("- ID: `{}`", port.id),
-            String::new(),
-            if body.is_empty() { "_No description._".to_string() } else { body.to_string() },
-            String::new(),
-        ]);
+        lines.extend([format!("## {}", port.name), format!("- ID: `{}`", port.id)]);
+        match &port.response {
+            None => lines.extend([String::new(), body(&port.description), String::new()]),
+            Some(response) => lines.extend([
+                format!("- Kind: {}", request_role(direction)),
+                String::new(),
+                "### Request".to_string(),
+                String::new(),
+                body(&port.description),
+                String::new(),
+                "### Response".to_string(),
+                String::new(),
+                body(response),
+                String::new(),
+            ]),
+        }
     }
     ctx.print(js::trim_end(&lines.join("\n")));
     Ok(())

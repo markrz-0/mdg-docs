@@ -21,7 +21,7 @@ original TypeScript implementation, and the CLI is a drop-in replacement
 cargo build --release
 target/release/mdg tree examples/authentication.mdg --ids
 target/release/mdg describe examples/authentication.mdg api-service --depth 1
-target/release/mdg trace examples/authentication.mdg protected-endpoint token-validation-request
+target/release/mdg trace examples/authentication.mdg protected-endpoint validate-token
 
 cd editor && npm install && npm run tauri dev   # then Open… examples/authentication.mdg
 ```

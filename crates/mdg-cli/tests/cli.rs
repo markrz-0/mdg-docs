@@ -64,7 +64,7 @@ fn fixture() -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().to_path_buf();
     let file = root.join("arch.mdg");
-    write_mdg(&file, &create_authentication_example()).unwrap();
+    write_mdg(&file, &create_authentication_example_v1()).unwrap();
     Fixture { _dir: dir, file: file.display().to_string(), root }
 }
 
@@ -99,7 +99,12 @@ fn creates_a_document_and_builds_a_graph_entirely_through_commands() {
     assert_eq!(module(&doc, "checkout").description, "# Checkout\nTakes payment.");
     assert_eq!(
         module(&doc, "checkout").inputs[0],
-        Port { id: "start".into(), name: "Begin".into(), description: "Receives the cart.".into() }
+        Port {
+            id: "start".into(),
+            name: "Begin".into(),
+            description: "Receives the cart.".into(),
+            ..Default::default()
+        }
     );
     assert_eq!(mdg(&["disconnect", &f, "c1"]).code, 0);
     assert!(module(&read_mdg(Path::new(&f)).unwrap(), "shop").connections.is_empty());
@@ -212,4 +217,79 @@ fn reads_deep_hierarchies() {
       \"id\": \"m0\""
     ));
     assert!(tree.stdout.contains("\"id\": \"m1999\""));
+}
+
+#[test]
+fn manages_request_ports() {
+    let fx = fixture();
+    let f = fx.root.join("rr.mdg").display().to_string();
+    mdg(&["new", &f, "--title", "RR", "--root-id", "app"]);
+    mdg(&["module", "add", &f, "--parent", "app", "--name", "Web", "--id", "web"]);
+    mdg(&["module", "add", &f, "--parent", "app", "--name", "Api", "--id", "api"]);
+    let add = mdg(&[
+        "port",
+        "add",
+        &f,
+        "web",
+        "--direction",
+        "output",
+        "--kind",
+        "request",
+        "--name",
+        "Fetch",
+        "--id",
+        "fetch",
+        "--description",
+        "GET /items",
+        "--response",
+        "The items.",
+        "--json",
+    ]);
+    assert_eq!(add.code, 0, "{}", add.stderr);
+    assert_eq!(add.json()["kind"], "request");
+    mdg_stdin(
+        &[
+            "port",
+            "add",
+            &f,
+            "api",
+            "--direction",
+            "input",
+            "--kind",
+            "request",
+            "--name",
+            "Items",
+            "--id",
+            "items",
+            "--response-file",
+            "-",
+        ],
+        "A JSON list.",
+    );
+    mdg(&["port", "add", &f, "api", "--direction", "input", "--name", "Ping", "--id", "ping"]);
+
+    let rejected = mdg(&["port", "add", &f, "api", "--direction", "input", "--name", "X", "--response", "no"]);
+    assert_eq!(rejected.code, 2, "{}", rejected.stderr);
+    let mismatch = mdg(&["connect", &f, "web:fetch", "api:ping"]);
+    assert_ne!(mismatch.code, 0);
+    assert!(mismatch.stderr.contains("same kind"), "{}", mismatch.stderr);
+    assert_eq!(mdg(&["connect", &f, "web:fetch", "api:items", "--id", "c1"]).code, 0);
+
+    let blocked = mdg(&["port", "set-kind", &f, "api", "items", "event"]);
+    assert!(blocked.stderr.contains("c1"), "{}", blocked.stderr);
+    assert_eq!(mdg(&["port", "set-response", &f, "api", "items", "--response", "Items as JSON."]).code, 0);
+    assert_ne!(mdg(&["port", "set-response", &f, "api", "ping", "--response", "x"]).code, 0);
+    assert_eq!(mdg(&["port", "set-kind", &f, "api", "ping", "request"]).code, 0);
+
+    let doc = read_mdg(Path::new(&f)).unwrap();
+    assert!(validate_document(&doc, ValidationOptions::default()).valid);
+    assert_eq!(doc.format_version, REQUEST_PORTS_SCHEMA_VERSION);
+    let items = &module(&doc, "api").inputs[0];
+    assert_eq!((items.kind, items.response.as_str()), (PortKind::Request, "Items as JSON."));
+    assert_eq!(module(&doc, "api").inputs[1].kind, PortKind::Request);
+
+    let inputs = mdg(&["inputs", &f, "api"]);
+    assert!(inputs.stdout.contains("## Items\n- ID: `items`\n- Kind: request/response, handled here\n\n### Request\n\n_No description._\n\n### Response\n\nItems as JSON."), "{}", inputs.stdout);
+    let json = mdg(&["outputs", &f, "web", "--json"]).json();
+    assert_eq!(json["ports"][0]["response"], "The items.");
 }

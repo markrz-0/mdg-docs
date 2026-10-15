@@ -11,7 +11,7 @@
 use serde_json::{Map, Value};
 
 use crate::jsmap::{js_key_order, JsMap};
-use crate::model::{BoundaryLayout, Connection, Endpoint, Layout, Metadata, Position};
+use crate::model::{BoundaryLayout, Connection, Endpoint, Layout, Metadata, PortKind, Position};
 use crate::serialization::format::MAX_SAFE_INTEGER;
 
 /// Top-level index keys defined by schema 1.x. Others are preserved as extensions.
@@ -21,7 +21,11 @@ pub const KNOWN_INDEX_KEYS: [&str; 6] = ["schemaVersion", "rootId", "metadata", 
 pub struct IndexPort {
     pub id: String,
     pub name: String,
+    /// Schema 1.1: `"request"`; absent for events.
+    pub kind: PortKind,
     pub description_ref: String,
+    /// Schema 1.1, request ports only: the response contract's block.
+    pub response_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -234,13 +238,46 @@ impl Checker {
         ok.then_some(out)
     }
 
+    fn port_kind(&mut self, value: Option<&Value>, path: Path<'_>) -> Option<PortKind> {
+        match value {
+            None => Some(PortKind::Event),
+            Some(_) => match self.string(value, path)?.as_str() {
+                "event" => Some(PortKind::Event),
+                "request" => Some(PortKind::Request),
+                other => {
+                    self.issue(path, format!("Invalid enum value. Expected 'event' | 'request', received '{other}'"));
+                    None
+                }
+            },
+        }
+    }
+
     fn port(&mut self, value: &Value, path: Path<'_>) -> Option<IndexPort> {
         let map = self.object(Some(value), path)?;
         let id = self.string(map.get("id"), &child(path, "id"));
         let name = self.string(map.get("name"), &child(path, "name"));
+        let kind = self.port_kind(map.get("kind"), &child(path, "kind"));
         let description_ref = self.non_empty_string(map.get("descriptionRef"), &child(path, "descriptionRef"));
-        let strict = self.strict(map, &["id", "name", "descriptionRef"], path);
-        keep(strict, IndexPort { id: id?, name: name?, description_ref: description_ref? })
+        let response_path = child(path, "responseRef");
+        let response_ref = match (kind, map.get("responseRef")) {
+            (Some(PortKind::Request), value) => self.non_empty_string(value, &response_path).map(Some),
+            (Some(PortKind::Event), Some(_)) => {
+                self.issue(&response_path, "Only request ports have a response");
+                None
+            }
+            (_, _) => Some(None),
+        };
+        let strict = self.strict(map, &["id", "name", "kind", "descriptionRef", "responseRef"], path);
+        keep(
+            strict,
+            IndexPort {
+                id: id?,
+                name: name?,
+                kind: kind?,
+                description_ref: description_ref?,
+                response_ref: response_ref?,
+            },
+        )
     }
 
     fn endpoint(&mut self, value: Option<&Value>, path: Path<'_>) -> Option<Endpoint> {

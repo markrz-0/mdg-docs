@@ -4,7 +4,7 @@
 
 use mdg_core::{
     get_module, get_module_path, get_port, js, route_connection, walk_descendants, Document, Endpoint, PortDirection,
-    Result, RouteOptions, RouteStep, WalkOptions,
+    PortKind, Result, RouteOptions, RouteStep, WalkOptions,
 };
 use serde::{Deserialize, Serialize};
 
@@ -84,7 +84,8 @@ fn endpoint_label(doc: &Document, ep: &Endpoint) -> Result<String> {
 fn describe_step(doc: &Document, after: &Document, step: &RouteStep) -> Result<String> {
     Ok(match step {
         RouteStep::CreatePort { module_id, direction, port } => {
-            format!("Create {direction} “{}” on {}", port.name, get_module(doc, module_id)?.name)
+            let kind = if port.kind == PortKind::Request { "request " } else { "" };
+            format!("Create {kind}{direction} “{}” on {}", port.name, get_module(doc, module_id)?.name)
         }
         RouteStep::ReusePort { module_id, direction, port_id } => format!(
             "Reuse {direction} “{}” on {}",
@@ -105,10 +106,14 @@ fn describe_step(doc: &Document, after: &Document, step: &RouteStep) -> Result<S
 
 impl Session {
     /// Ports the dialog can route to (`Send`: every input) or from
-    /// (`Receive`: every output), excluding the source port's own module.
+    /// (`Receive`: every output) of the source port's kind, excluding the
+    /// source port's own module.
     pub fn route_choices(&self, source: &Endpoint, mode: Option<RouteMode>) -> Result<RouteChoices> {
         let doc = &self.document;
-        let source_direction = get_port(doc, &source.module_id, &source.port_id)?.direction;
+        let source_port = get_port(doc, &source.module_id, &source.port_id)?;
+        let source_direction = source_port.direction;
+        // Only ports of the same kind can be joined.
+        let source_kind = source_port.port.kind;
         let mode = mode.unwrap_or(if source_direction == PortDirection::Output {
             RouteMode::Send
         } else {
@@ -122,7 +127,7 @@ impl Session {
                 continue;
             }
             let path = module_path_label(doc, &module.id)?;
-            for port in module.ports(wanted) {
+            for port in module.ports(wanted).iter().filter(|p| p.kind == source_kind) {
                 let label = format!("{path} › {}", port.name);
                 let search = format!("{label} {} {}", module.id, port.id).to_lowercase();
                 candidates.push(Candidate {
