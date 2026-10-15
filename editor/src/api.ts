@@ -167,7 +167,7 @@ export const commands = {
     invoke<View>('update_tag_cmd', { tagId, name: change.name ?? null, color: change.color ?? null }),
   moveTag: (tagId: string, index: number) => invoke<View>('move_tag_cmd', { tagId, index }),
   removeTag: (tagId: string) => invoke<View>('remove_tag_cmd', { tagId }),
-  addChildModule: () => invoke<View>('add_child_module'),
+  addChildModule: (at?: Position) => invoke<View>('add_child_module', { at: at ?? null }),
   addPort: (moduleId: string, direction: PortDirection, kind: PortKind) =>
     invoke<View>('add_port', { moduleId, direction, kind }),
   connect: (from: Endpoint, to: Endpoint) => invoke<View>('connect', { from, to }),

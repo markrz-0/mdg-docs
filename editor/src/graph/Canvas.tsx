@@ -142,7 +142,23 @@ function ModuleCanvas({ currentModuleId }: { currentModuleId: string }) {
     void run(commands.select({ kind: 'connection', connectionId: edge.id }));
   }, []);
 
-  const onPaneClick = useCallback(() => void run(commands.select(null)), []);
+  const onPaneClick = useCallback(() => {
+    setMenu(null);
+    void run(commands.select(null));
+  }, []);
+
+  // Right-clicking empty canvas offers to add a module there; right-clicking
+  // anything else only suppresses the webview's own menu.
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const onPaneContextMenu = useCallback((event: MouseEvent | React.MouseEvent) => {
+    event.preventDefault();
+    setMenu({ x: event.clientX, y: event.clientY });
+  }, []);
+  const suppressContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    setMenu(null);
+  }, []);
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   return (
     <div className="canvas" data-testid="canvas">
@@ -160,6 +176,10 @@ function ModuleCanvas({ currentModuleId }: { currentModuleId: string }) {
         onNodeDoubleClick={onNodeDoubleClick}
         onEdgeClick={onEdgeClick}
         onPaneClick={onPaneClick}
+        onPaneContextMenu={onPaneContextMenu}
+        onNodeContextMenu={suppressContextMenu}
+        onEdgeContextMenu={suppressContextMenu}
+        onMoveStart={closeMenu}
         zoomOnDoubleClick={false}
         deleteKeyCode={null}
         fitView
@@ -173,7 +193,55 @@ function ModuleCanvas({ currentModuleId }: { currentModuleId: string }) {
         <MiniMap pannable zoomable />
         <ColoringPanel />
         <LayoutPanel />
+        {menu && <PaneMenu at={menu} onClose={closeMenu} />}
       </ReactFlow>
+    </div>
+  );
+}
+
+/**
+ * Context menu for empty canvas. Rendered inside React Flow so it can map the
+ * click point to graph coordinates for the new module's position.
+ */
+function PaneMenu({ at, onClose }: { at: { x: number; y: number }; onClose: () => void }) {
+  const flow = useReactFlow();
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as globalThis.Node)) onClose();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('blur', onClose);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('blur', onClose);
+    };
+  }, [onClose]);
+
+  const addModule = () => {
+    const p = flow.screenToFlowPosition(at);
+    onClose();
+    void run(commands.addChildModule({ x: Math.round(p.x), y: Math.round(p.y) }));
+  };
+
+  return (
+    <div
+      ref={ref}
+      className="context-menu"
+      style={{ left: at.x, top: at.y }}
+      role="menu"
+      onContextMenu={(e) => e.preventDefault()}
+      data-testid="canvas-context-menu"
+    >
+      <button role="menuitem" onClick={addModule} data-testid="context-add-module">
+        + New module
+      </button>
     </div>
   );
 }

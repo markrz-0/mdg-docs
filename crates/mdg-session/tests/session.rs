@@ -61,7 +61,7 @@ fn module<'a>(s: &'a Session, id: &str) -> &'a Module {
 fn routes_edits_through_core_operations_and_tracks_dirtiness() {
     let mut s = loaded();
     assert!(!s.dirty());
-    let id = s.add_child_module(Some("Audit")).unwrap();
+    let id = s.add_child_module(Some("Audit"), None).unwrap();
     assert!(s.dirty());
     assert_eq!(s.selection(), Some(&Selection::Module { module_id: id.clone() }));
     assert!(s.positions().get(&id).is_some());
@@ -245,7 +245,7 @@ fn tracks_dirtiness_against_the_saved_state_across_undo() {
 #[test]
 fn restores_navigation_safely_when_undo_removes_the_open_module() {
     let mut s = loaded();
-    let id = s.add_child_module(Some("Temp")).unwrap();
+    let id = s.add_child_module(Some("Temp"), None).unwrap();
     s.navigate(&id);
     s.undo();
     assert_eq!(s.current_module_id(), "application");

@@ -157,9 +157,9 @@ fn set_port_kind_cmd(state: Shared<'_>, module_id: String, port_id: String, kind
 }
 
 #[tauri::command]
-fn add_child_module(state: Shared<'_>) -> View {
+fn add_child_module(state: Shared<'_>, at: Option<Position>) -> View {
     with(&state, |s| {
-        s.add_child_module(None);
+        s.add_child_module(None, at);
     })
 }
 

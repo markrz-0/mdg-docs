@@ -479,14 +479,16 @@ impl Session {
 
     // ------------------------------------------------------------ edits
 
-    pub fn add_child_module(&mut self, name: Option<&str>) -> Option<String> {
+    /// Adds a module inside the open one, at `at` or else the next free grid slot.
+    pub fn add_child_module(&mut self, name: Option<&str>, at: Option<Position>) -> Option<String> {
         let parent = self.current_module_id.clone();
         let name = name.unwrap_or("New module").to_string();
         let id = self.run(None, |s| {
             let result =
                 add_module(&s.document, AddModuleOptions { parent_id: parent.clone(), name, ..Default::default() })?;
             let mut positions = (*s.positions).clone();
-            positions.insert(result.id.clone(), next_position(&s.document, &parent, &s.positions));
+            let position = at.unwrap_or_else(|| next_position(&s.document, &parent, &s.positions));
+            positions.insert(result.id.clone(), position);
             Ok((result.document, result.id, Some(positions)))
         })?;
         self.selection = Some(Selection::Module { module_id: id.clone() });
