@@ -252,7 +252,10 @@ pub fn port_set_kind(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
         let port_id = resolve_port_id(doc, &module_id, &p.args[2])?;
         Ok(Outcome {
             document: set_port_kind(doc, &module_id, &port_id, kind)?,
-            message: format!("{module_id}:{port_id} is now a {kind} port"),
+            message: format!(
+                "{module_id}:{port_id} is now {} port",
+                if kind == PortKind::Event { "an event" } else { "a request/response" }
+            ),
             result: vec![("moduleId", json!(module_id)), ("portId", json!(port_id)), ("kind", json!(kind))],
         })
     })
