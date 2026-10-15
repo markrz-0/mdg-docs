@@ -181,11 +181,28 @@ code {
 
 .workspace {
   display: grid;
-  grid-template-columns: 240px 1fr 340px;
+  /* Columns (panel widths and splitters) are set inline by App. */
   min-height: 0;
 }
 
+.splitter {
+  width: 5px;
+  margin: 0 -2px;
+  position: relative;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+  transition: background 0.1s;
+}
+
+.splitter:hover,
+.splitter.dragging {
+  background: var(--accent);
+}
+
 .panel {
+  min-width: 0;
   background: var(--panel);
   overflow: auto;
   padding: 10px 12px;
