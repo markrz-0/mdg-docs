@@ -11,11 +11,11 @@
 use serde_json::{Map, Value};
 
 use crate::jsmap::{js_key_order, JsMap};
-use crate::model::{BoundaryLayout, Connection, Endpoint, Layout, Metadata, PortKind, Position};
+use crate::model::{BoundaryLayout, Connection, Endpoint, Layout, Metadata, PortKind, Position, Tag};
 use crate::serialization::format::MAX_SAFE_INTEGER;
 
 /// Top-level index keys defined by schema 1.x. Others are preserved as extensions.
-pub const KNOWN_INDEX_KEYS: [&str; 6] = ["schemaVersion", "rootId", "metadata", "modules", "content", "layout"];
+pub const KNOWN_INDEX_KEYS: [&str; 7] = ["schemaVersion", "rootId", "metadata", "modules", "content", "layout", "tags"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndexPort {
@@ -38,6 +38,8 @@ pub struct IndexModule {
     pub outputs: Vec<IndexPort>,
     pub child_ids: Vec<String>,
     pub connections: Vec<Connection>,
+    /// Schema 1.2: IDs of the tags attached to the module; empty when absent.
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +56,9 @@ pub struct Index {
     pub modules: JsMap<IndexModule>,
     pub content: JsMap<ContentEntry>,
     pub layout: Option<Layout>,
+    /// Schema 1.2: the document's tag list. `None` when absent (older
+    /// documents), which means the default tags.
+    pub tags: Option<Vec<Tag>>,
     /// Unknown top-level keys, preserved verbatim.
     pub extensions: JsMap<Value>,
 }
@@ -307,9 +312,13 @@ impl Checker {
         let outputs = self.list(map.get("outputs"), &child(path, "outputs"), Self::port);
         let child_ids = self.list(map.get("childIds"), &child(path, "childIds"), |c, v, p| c.string(Some(v), p));
         let connections = self.list(map.get("connections"), &child(path, "connections"), Self::connection);
+        let tags = match map.get("tags") {
+            None => Some(vec![]),
+            Some(v) => self.list(Some(v), &child(path, "tags"), |c, v, p| c.string(Some(v), p)),
+        };
         let strict = self.strict(
             map,
-            &["id", "parentId", "name", "descriptionRef", "inputs", "outputs", "childIds", "connections"],
+            &["id", "parentId", "name", "descriptionRef", "inputs", "outputs", "childIds", "connections", "tags"],
             path,
         );
         keep(
@@ -323,8 +332,25 @@ impl Checker {
                 outputs: outputs?,
                 child_ids: child_ids?,
                 connections: connections?,
+                tags: tags?,
             },
         )
+    }
+
+    fn tag(&mut self, value: &Value, path: Path<'_>) -> Option<Tag> {
+        let map = self.object(Some(value), path)?;
+        let id = self.string(map.get("id"), &child(path, "id"));
+        let name = self.string(map.get("name"), &child(path, "name"));
+        let color = self.string(map.get("color"), &child(path, "color"));
+        let strict = self.strict(map, &["id", "name", "color"], path);
+        keep(strict, Tag { id: id?, name: name?, color: color? })
+    }
+
+    fn tags(&mut self, value: Option<&Value>, path: Path<'_>) -> Option<Option<Vec<Tag>>> {
+        match value {
+            None => Some(None),
+            Some(_) => self.list(value, path, Self::tag).map(Some),
+        }
     }
 
     fn content(&mut self, value: &Value, path: Path<'_>) -> Option<ContentEntry> {
@@ -401,6 +427,7 @@ pub fn parse_index(raw: &Map<String, Value>) -> std::result::Result<Index, Strin
     let modules = c.record(raw.get("modules"), &field("modules"), Checker::module);
     let content = c.record(raw.get("content"), &field("content"), Checker::content);
     let layout = c.layout(raw.get("layout"), &field("layout"));
+    let tags = c.tags(raw.get("tags"), &field("tags"));
     if !c.issues.is_empty() {
         return Err(c.issues.iter().take(5).cloned().collect::<Vec<_>>().join("; "));
     }
@@ -416,6 +443,7 @@ pub fn parse_index(raw: &Map<String, Value>) -> std::result::Result<Index, Strin
         modules: modules.expect("checked"),
         content: content.expect("checked"),
         layout: layout.expect("checked"),
+        tags: tags.expect("checked"),
         extensions,
     })
 }

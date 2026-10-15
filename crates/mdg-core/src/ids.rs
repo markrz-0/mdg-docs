@@ -30,6 +30,7 @@ pub enum IdKind {
     Module,
     Port,
     Connection,
+    Tag,
 }
 
 impl IdKind {
@@ -38,6 +39,7 @@ impl IdKind {
             IdKind::Module => "mod",
             IdKind::Port => "port",
             IdKind::Connection => "conn",
+            IdKind::Tag => "tag",
         }
     }
 }
@@ -76,6 +78,7 @@ pub struct SequentialIdGenerator {
     module: u64,
     port: u64,
     connection: u64,
+    tag: u64,
 }
 
 impl SequentialIdGenerator {
@@ -90,6 +93,7 @@ impl IdGenerator for SequentialIdGenerator {
             IdKind::Module => &mut self.module,
             IdKind::Port => &mut self.port,
             IdKind::Connection => &mut self.connection,
+            IdKind::Tag => &mut self.tag,
         };
         *counter += 1;
         format!("{}{}-{}", self.prefix, kind.prefix(), counter)

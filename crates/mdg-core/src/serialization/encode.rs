@@ -126,19 +126,20 @@ pub fn encode_mdg(doc: &Document, options: EncodeOptions) -> Result<Vec<u8>> {
                 })
             })
             .collect();
-        modules.insert(
-            id.to_string(),
-            json!({
-                "id": m.id,
-                "parentId": m.parent_id,
-                "name": m.name,
-                "descriptionRef": description_ref,
-                "inputs": inputs,
-                "outputs": outputs,
-                "childIds": m.child_ids,
-                "connections": connections,
-            }),
-        );
+        let mut record = json!({
+            "id": m.id,
+            "parentId": m.parent_id,
+            "name": m.name,
+            "descriptionRef": description_ref,
+            "inputs": inputs,
+            "outputs": outputs,
+            "childIds": m.child_ids,
+            "connections": connections,
+        });
+        if !m.tags.is_empty() {
+            record["tags"] = json!(m.tags);
+        }
+        modules.insert(id.to_string(), record);
     }
 
     let mut metadata = Map::new();
@@ -180,6 +181,12 @@ pub fn encode_mdg(doc: &Document, options: EncodeOptions) -> Result<Vec<u8>> {
         Value::Object(out)
     });
 
+    // The default tag list is implied when absent, so documents that do not
+    // use tags stay byte-identical with schema 1.0/1.1 writers.
+    let tags = doc.has_custom_tags().then(|| {
+        Value::Array(doc.tags.iter().map(|t| json!({ "id": t.id, "name": t.name, "color": t.color })).collect())
+    });
+
     let extensions: Vec<(String, Value)> = match &doc.extensions {
         None => vec![],
         Some(ext) => sorted_keys(ext)
@@ -217,6 +224,9 @@ pub fn encode_mdg(doc: &Document, options: EncodeOptions) -> Result<Vec<u8>> {
         index.insert("content".into(), Value::Object(content));
         if let Some(layout) = &layout {
             index.insert("layout".into(), layout.clone());
+        }
+        if let Some(tags) = &tags {
+            index.insert("tags".into(), tags.clone());
         }
         for (key, value) in &extensions {
             index.insert(key.clone(), value.clone());

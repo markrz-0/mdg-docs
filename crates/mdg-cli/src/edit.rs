@@ -5,17 +5,17 @@
 use std::path::Path;
 
 use mdg_core::{
-    add_connection, add_module, add_port, assert_valid, create_document, get_connection, get_module, move_module,
-    read_mdg, remove_connection, remove_module, remove_port, rename_module, rename_port, route_connection,
-    set_port_kind, update_module_description, update_port_description, update_port_response, write_mdg,
-    AddConnectionOptions, AddModuleOptions, AddPortOptions, CreateDocumentOptions, Document, JsMap, MdgError,
-    PortDirection, PortKind, Result, RouteOptions, RouteStep,
+    add_connection, add_module, add_port, add_tag, assert_valid, create_document, get_connection, get_module,
+    move_module, read_mdg, remove_connection, remove_module, remove_port, remove_tag, rename_module, rename_port,
+    route_connection, set_port_kind, tag_module, untag_module, update_module_description, update_port_description,
+    update_port_response, update_tag, write_mdg, AddConnectionOptions, AddModuleOptions, AddPortOptions, AddTagOptions,
+    CreateDocumentOptions, Document, JsMap, MdgError, PortDirection, PortKind, Result, RouteOptions, RouteStep,
 };
 use serde_json::{json, Map, Value};
 
 use crate::commander::Parsed;
 use crate::program::Action;
-use crate::resolve::{resolve_endpoint, resolve_module_id, resolve_port_id};
+use crate::resolve::{resolve_endpoint, resolve_module_id, resolve_port_id, resolve_tag_id};
 use crate::shared::{read_description, read_markdown, Context};
 
 type Args = Parsed<Action>;
@@ -186,6 +186,77 @@ pub fn module_set_description(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
             document: update_module_description(doc, &module_id, &description)?,
             message: format!("Updated description of {module_id}"),
             result: vec![("moduleId", json!(module_id))],
+        })
+    })
+}
+
+/// `module tag` (`add`) and `module untag`.
+pub fn module_tag(ctx: &mut Context<'_>, p: &Args, add: bool) -> Result<()> {
+    run_edit(ctx, p, |doc| {
+        let module_id = resolve_module_id(doc, &p.args[1])?;
+        let tag_ids = p.args[2..].iter().map(|t| resolve_tag_id(doc, t)).collect::<Result<Vec<_>>>()?;
+        let document =
+            if add { tag_module(doc, &module_id, &tag_ids)? } else { untag_module(doc, &module_id, &tag_ids)? };
+        let tags = get_module(&document, &module_id)?.tags.clone();
+        let shown = if tags.is_empty() { "none".to_string() } else { tags.join(", ") };
+        Ok(Outcome {
+            document,
+            message: format!("Tags of {module_id}: {shown}"),
+            result: vec![("moduleId", json!(module_id)), ("tags", json!(tags))],
+        })
+    })
+}
+
+pub fn tag_add(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
+    run_edit(ctx, p, |doc| {
+        let result = add_tag(
+            doc,
+            AddTagOptions {
+                name: p.string("name").unwrap_or_default(),
+                color: p.string("color").unwrap_or_default(),
+                id: p.string("id"),
+                ..Default::default()
+            },
+        )?;
+        let tag = result.document.find_tag(&result.id).expect("tag was added").clone();
+        Ok(Outcome {
+            document: result.document,
+            message: format!("Added tag {} \"{}\" ({})", tag.id, tag.name, tag.color),
+            result: vec![("tag", json!(tag))],
+        })
+    })
+}
+
+pub fn tag_update(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
+    let (name, color) = (p.string("name"), p.string("color"));
+    if name.is_none() && color.is_none() {
+        return Err(MdgError::argument("Provide --name and/or --color."));
+    }
+    run_edit(ctx, p, |doc| {
+        let tag_id = resolve_tag_id(doc, &p.args[1])?;
+        let document = update_tag(doc, &tag_id, name.as_deref(), color.as_deref())?;
+        let tag = document.find_tag(&tag_id).expect("tag exists").clone();
+        Ok(Outcome {
+            document,
+            message: format!("Updated tag {} \"{}\" ({})", tag.id, tag.name, tag.color),
+            result: vec![("tag", json!(tag))],
+        })
+    })
+}
+
+pub fn tag_remove(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
+    run_edit(ctx, p, |doc| {
+        let tag_id = resolve_tag_id(doc, &p.args[1])?;
+        let untagged: Vec<&str> =
+            doc.modules.iter().filter(|(_, m)| m.tags.contains(&tag_id)).map(|(id, _)| id).collect();
+        let mut message = format!("Removed tag {tag_id}");
+        if !untagged.is_empty() {
+            message.push_str(&format!(" from the document and {} module(s): {}", untagged.len(), untagged.join(", ")));
+        }
+        Ok(Outcome {
+            document: remove_tag(doc, &tag_id)?,
+            message,
+            result: vec![("tagId", json!(tag_id)), ("untaggedModules", json!(untagged))],
         })
     })
 }

@@ -7,7 +7,7 @@ use super::format::{CONTAINER_MAJOR, HEADER_SIZE, MAGIC, MAGIC_BYTES, MAX_SAFE_I
 use super::index::{parse_index, Index};
 use super::source::{ByteSource, BytesSource};
 use crate::error::{MdgError, Result};
-use crate::model::{Document, Module, Port, SCHEMA_MAJOR};
+use crate::model::{default_tags, Document, Module, Port, SCHEMA_MAJOR};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Header {
@@ -160,6 +160,11 @@ pub fn read_index(source: &mut dyn ByteSource) -> Result<IndexRead> {
     assert_safe_keys(record.get("modules"), "modules")?;
     assert_safe_keys(record.get("content"), "content")?;
     assert_safe_keys(record.get("metadata"), "metadata")?;
+    if let Some(Value::Array(tags)) = record.get("tags") {
+        for tag in tags {
+            assert_safe_keys(Some(tag), "tags")?;
+        }
+    }
     if let Some(Value::Object(layout)) = record.get("layout") {
         assert_safe_keys(layout.get("positions"), "layout")?;
         assert_safe_keys(layout.get("boundaries"), "layout")?;
@@ -203,6 +208,7 @@ pub fn index_to_document(index: &Index, mut load_text: impl FnMut(&str, &str) ->
             outputs,
             child_ids: m.child_ids.clone(),
             connections: m.connections.clone(),
+            tags: m.tags.clone(),
         };
         modules.insert(key, Arc::new(module));
     }
@@ -211,6 +217,7 @@ pub fn index_to_document(index: &Index, mut load_text: impl FnMut(&str, &str) ->
         root_id: index.root_id.clone(),
         modules,
         metadata: index.metadata.clone(),
+        tags: index.tags.clone().unwrap_or_else(default_tags),
         layout: index.layout.clone(),
         extensions: if index.extensions.is_empty() { None } else { Some(index.extensions.clone()) },
     })

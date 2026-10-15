@@ -39,6 +39,14 @@ export interface Connection {
   to: Endpoint;
 }
 
+/** A document-level label modules can carry. */
+export interface Tag {
+  id: string;
+  name: string;
+  /** `#rrggbb`. */
+  color: string;
+}
+
 export interface Module {
   id: string;
   parentId: string | null;
@@ -48,7 +56,11 @@ export interface Module {
   outputs: Port[];
   childIds: string[];
   connections: Connection[];
+  /** IDs of the document tags the module carries; omitted when empty. */
+  tags?: string[];
 }
+
+export const moduleTags = (module: Module): string[] => module.tags ?? [];
 
 export interface Position {
   x: number;
@@ -59,6 +71,7 @@ export interface DocumentView {
   rootId: string;
   title: string;
   modules: Record<string, Module>;
+  tags: Tag[];
 }
 
 export type Selection =
@@ -148,6 +161,12 @@ export const commands = {
     invoke<View>('set_port_response', { moduleId, portId, text }),
   setPortKind: (moduleId: string, portId: string, kind: PortKind) =>
     invoke<View>('set_port_kind_cmd', { moduleId, portId, kind }),
+  setModuleTags: (moduleId: string, tags: string[]) => invoke<View>('set_module_tags_cmd', { moduleId, tags }),
+  addTag: (name: string, color: string) => invoke<View>('add_tag_cmd', { name, color }),
+  updateTag: (tagId: string, change: { name?: string; color?: string }) =>
+    invoke<View>('update_tag_cmd', { tagId, name: change.name ?? null, color: change.color ?? null }),
+  moveTag: (tagId: string, index: number) => invoke<View>('move_tag_cmd', { tagId, index }),
+  removeTag: (tagId: string) => invoke<View>('remove_tag_cmd', { tagId }),
   addChildModule: () => invoke<View>('add_child_module'),
   addPort: (moduleId: string, direction: PortDirection, kind: PortKind) =>
     invoke<View>('add_port', { moduleId, direction, kind }),

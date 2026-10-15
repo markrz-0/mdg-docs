@@ -22,6 +22,8 @@ pub enum Action {
     ModuleRename,
     ModuleMove,
     ModuleSetDescription,
+    ModuleTag,
+    ModuleUntag,
     PortAdd,
     PortRemove,
     PortRename,
@@ -30,6 +32,10 @@ pub enum Action {
     PortSetKind,
     Connect,
     Disconnect,
+    TagList,
+    TagAdd,
+    TagUpdate,
+    TagRemove,
 }
 
 type Cmd = Command<Action>;
@@ -238,6 +244,77 @@ fn module_commands() -> Cmd {
             ]))
             .action(Action::ModuleSetDescription),
         )
+        .command(
+            with_edit_options(
+                Cmd::new("tag", "Attach document tags to a module (see `mdg tag list`). Tags it already carries are kept.")
+                    .argument("<file>", ".mdg file")
+                    .argument("<module-id>", "module ID")
+                    .argument("<tag-id...>", "one or more tag IDs"),
+            )
+            .help_after(examples(&[
+                "mdg module tag architecture.mdg auth-001 done",
+                "mdg module tag architecture.mdg billing partially-done --json",
+            ]))
+            .action(Action::ModuleTag),
+        )
+        .command(
+            with_edit_options(
+                Cmd::new("untag", "Remove tags from a module. Tags it does not carry are ignored.")
+                    .argument("<file>", ".mdg file")
+                    .argument("<module-id>", "module ID")
+                    .argument("<tag-id...>", "one or more tag IDs"),
+            )
+            .help_after(examples(&["mdg module untag architecture.mdg auth-001 partially-done"]))
+            .action(Action::ModuleUntag),
+        )
+}
+
+fn tag_commands() -> Cmd {
+    Cmd::new(
+        "tag",
+        "List, add, change or remove the document's tags. Every document starts with: done, partially \
+         done, not done, to implement.",
+    )
+    .command(
+        Cmd::new("list", "List the document's tags with their colours and how many modules carry each.")
+            .argument("<file>", ".mdg file")
+            .option(json("machine-readable output"))
+            .help_after(examples(&["mdg tag list architecture.mdg", "mdg tag list architecture.mdg --json"]))
+            .action(Action::TagList),
+    )
+    .command(
+        with_edit_options(
+            Cmd::new("add", "Add a tag to the document's tag list.")
+                .argument("<file>", ".mdg file")
+                .option(Opt::new("--name <name>", "tag name").mandatory())
+                .option(Opt::new("--color <#rrggbb>", "tag colour").mandatory())
+                .option(Opt::new("--id <id>", "explicit tag ID (generated when omitted)")),
+        )
+        .help_after(examples(&[
+            "mdg tag add architecture.mdg --name \"needs review\" --color \"#8e44ad\" --id needs-review",
+        ]))
+        .action(Action::TagAdd),
+    )
+    .command(
+        with_edit_options(
+            Cmd::new("update", "Rename a tag or change its colour. Its ID never changes.")
+                .argument("<file>", ".mdg file")
+                .argument("<tag-id>", "tag ID")
+                .option(Opt::new("--name <name>", "new name"))
+                .option(Opt::new("--color <#rrggbb>", "new colour")),
+        )
+        .help_after(examples(&["mdg tag update architecture.mdg to-implement --color \"#5b8def\""]))
+        .action(Action::TagUpdate),
+    )
+    .command(
+        with_edit_options(
+            Cmd::new("remove", "Remove a tag from the document and from every module that carries it.")
+                .argument("<file>", ".mdg file")
+                .argument("<tag-id>", "tag ID"),
+        )
+        .help_after(examples(&["mdg tag remove architecture.mdg needs-review --dry-run"]))
+        .action(Action::TagRemove),
+    )
 }
 
 fn port_commands() -> Cmd {
@@ -344,6 +421,7 @@ fn edit_commands(program: Cmd) -> Cmd {
         )
         .command(module_commands())
         .command(port_commands())
+        .command(tag_commands())
         .command(
             with_edit_options(
                 Cmd::new(

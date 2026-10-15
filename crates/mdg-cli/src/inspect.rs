@@ -64,6 +64,41 @@ pub fn info(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
     Ok(())
 }
 
+pub fn tag_list(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
+    #[derive(Serialize)]
+    struct TagJson<'a> {
+        id: &'a str,
+        name: &'a str,
+        color: &'a str,
+        modules: Vec<&'a str>,
+    }
+    let read = read_skeleton(&p.args[0])?;
+    let doc = &read.doc;
+    let tags: Vec<TagJson<'_>> = doc
+        .tags
+        .iter()
+        .map(|t| TagJson {
+            id: &t.id,
+            name: &t.name,
+            color: &t.color,
+            modules: doc.modules.iter().filter(|(_, m)| m.tags.contains(&t.id)).map(|(id, _)| id).collect(),
+        })
+        .collect();
+    if p.flag("json") {
+        ctx.print_json(&serde_json::json!({ "tags": tags }));
+        return Ok(());
+    }
+    let mut lines = vec![format!("Tags of {}:", doc.metadata.title)];
+    if tags.is_empty() {
+        lines.push("  (none)".to_string());
+    }
+    for t in &tags {
+        lines.push(format!("- {} \"{}\" {} ({} module(s))", t.id, t.name, t.color, t.modules.len()));
+    }
+    ctx.print(&lines.join("\n"));
+    Ok(())
+}
+
 pub fn tree(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
     let read = read_skeleton(&p.args[0])?;
     let options = TreeOptions { root_id: None, depth: p.int("depth").map(|d| d as usize), ids: p.flag("ids") };

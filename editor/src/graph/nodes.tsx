@@ -1,6 +1,7 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import type { MouseEvent } from 'react';
+import type { CSSProperties, MouseEvent } from 'react';
 import { commands } from '../api';
+import { TagChip } from '../components/TagChip';
 import { run } from '../state/store';
 import type { BoundaryFlowNode, ModuleFlowNode, PortView } from './buildGraph';
 
@@ -31,7 +32,11 @@ function PortLabel({ moduleId, port, selected }: { moduleId: string; port: PortV
 /** A child module: name, inputs (left handles) and outputs (right handles). */
 export function ModuleNode({ data, selected }: NodeProps<ModuleFlowNode>) {
   return (
-    <div className={`mdg-node${selected ? ' selected' : ''}`} data-testid={`node-${data.moduleId}`}>
+    <div
+      className={`mdg-node${data.color ? ' tagged' : ''}${selected ? ' selected' : ''}`}
+      style={data.color ? ({ '--node-tag': data.color } as CSSProperties) : undefined}
+      data-testid={`node-${data.moduleId}`}
+    >
       <div className="mdg-node-title">
         <span className="mdg-node-name">{data.name}</span>
         {data.childCount > 0 && (
@@ -40,6 +45,13 @@ export function ModuleNode({ data, selected }: NodeProps<ModuleFlowNode>) {
           </span>
         )}
       </div>
+      {data.tags.length > 0 && (
+        <div className="mdg-node-tags">
+          {data.tags.map((tag) => (
+            <TagChip key={tag.id} tag={tag} />
+          ))}
+        </div>
+      )}
       <div className="mdg-node-ports">
         <div className="mdg-port-column">
           {data.inputs.map((port) => (

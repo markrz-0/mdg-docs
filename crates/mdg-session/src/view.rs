@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use mdg_core::{
     check_connection, connections_referencing, describe_connection, find_connection, format_endpoint, get_module,
-    get_module_path, same_endpoint, validate_document, Endpoint, JsMap, Module, ModuleRef, Result, ValidationOptions,
+    get_module_path, same_endpoint, validate_document, Endpoint, JsMap, Module, ModuleRef, Result, Tag,
+    ValidationOptions,
 };
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +20,8 @@ pub struct DocumentView {
     pub root_id: String,
     pub title: String,
     pub modules: JsMap<Arc<Module>>,
+    /// The document's tag list; modules reference these by ID.
+    pub tags: Vec<Tag>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -103,6 +106,7 @@ impl Session {
                 root_id: doc.root_id.clone(),
                 title: doc.metadata.title.clone(),
                 modules: doc.modules.clone(),
+                tags: doc.tags.clone(),
             },
             positions: self.positions.clone(),
             file_name: self.file_name.clone(),

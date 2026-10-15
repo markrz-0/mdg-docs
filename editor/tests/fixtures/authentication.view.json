@@ -395,7 +395,29 @@
         "childIds": [],
         "connections": []
       }
-    }
+    },
+    "tags": [
+      {
+        "id": "done",
+        "name": "done",
+        "color": "#2a8a4a"
+      },
+      {
+        "id": "partially-done",
+        "name": "partially done",
+        "color": "#d4a017"
+      },
+      {
+        "id": "not-done",
+        "name": "not done",
+        "color": "#c43b3b"
+      },
+      {
+        "id": "to-implement",
+        "name": "to implement",
+        "color": "#3b6fd8"
+      }
+    ]
   },
   "positions": {
     "frontend": {

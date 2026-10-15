@@ -151,10 +151,25 @@ fn normalize(text: &str, dir: &Path) -> String {
     out
 }
 
-/// Cases whose help text lists request/response port options and commands
-/// the TypeScript CLI never had. Only their output text is exempt; exit codes
-/// are still compared. The new commands are covered in `cli.rs`.
-const EXTENDED_HELP: [&str; 3] = ["port without subcommand", "port help flag", "help port add"];
+/// Cases whose help text lists commands and options the TypeScript CLI never
+/// had (request/response ports, tags). Only their output text is exempt; exit
+/// codes are still compared. The new commands are covered in `cli.rs`.
+const EXTENDED_HELP: [&str; 14] = [
+    "port without subcommand",
+    "port help flag",
+    "help port add",
+    "help",
+    "help short",
+    "help command",
+    "no arguments",
+    "help for module via help",
+    "help for unknown via help",
+    "help module add via help",
+    "module without subcommand",
+    "module help flag",
+    "module help command",
+    "help before command",
+];
 
 #[test]
 fn matches_the_typescript_cli() {

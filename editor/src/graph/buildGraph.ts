@@ -1,5 +1,16 @@
 import type { Edge, Node } from '@xyflow/react';
-import { portKind, type DocumentView, type Endpoint, type Module, type Port, type PortKind, type Position, type Selection } from '../api';
+import {
+  moduleTags,
+  portKind,
+  type DocumentView,
+  type Endpoint,
+  type Module,
+  type Port,
+  type PortKind,
+  type Position,
+  type Selection,
+  type Tag,
+} from '../api';
 import { boundaryKey, type BoundarySide } from '../state/layoutKeys';
 
 /**
@@ -27,6 +38,9 @@ export interface PortView {
 export type ModuleNodeData = {
   moduleId: string;
   name: string;
+  tags: Tag[];
+  /** Node colour: the tag's colour, or the mix of all its tags' colours; null when untagged. */
+  color: string | null;
   inputs: PortView[];
   outputs: PortView[];
   childCount: number;
@@ -61,6 +75,23 @@ export function endpointKind(doc: DocumentView, ep: Endpoint): PortKind {
 
 /** Highlight colour of a port or connection, by kind. */
 export const kindColor = (kind: PortKind) => (kind === 'request' ? 'var(--request)' : 'var(--accent)');
+
+/** The tags a module carries, resolved from the document's tag list, in the module's order. */
+export function resolveTags(doc: DocumentView, module: Module): Tag[] {
+  return moduleTags(module).flatMap((id) => doc.tags.filter((t) => t.id === id));
+}
+
+/** Mixes `#rrggbb` colours by averaging their channels; null for none. */
+export function mixColors(colors: string[]): string | null {
+  if (colors.length === 0) return null;
+  const channel = (offset: number) => {
+    const sum = colors.reduce((total, c) => total + parseInt(c.slice(offset, offset + 2), 16), 0);
+    return Math.round(sum / colors.length)
+      .toString(16)
+      .padStart(2, '0');
+  };
+  return `#${channel(1)}${channel(3)}${channel(5)}`;
+}
 
 export function getModule(doc: DocumentView, moduleId: string): Module {
   const module = Object.hasOwn(doc.modules, moduleId) ? doc.modules[moduleId] : undefined;
@@ -107,6 +138,8 @@ export function buildGraph(
       data: {
         moduleId: child.id,
         name: child.name,
+        tags: resolveTags(doc, child),
+        color: mixColors(resolveTags(doc, child).map((t) => t.color)),
         inputs: child.inputs.map(portView),
         outputs: child.outputs.map(portView),
         childCount: child.childIds.length,

@@ -11,7 +11,7 @@ use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 
 use crate::ids::is_valid_id;
-use crate::model::{Document, Endpoint, Module, PortDirection, PortKind};
+use crate::model::{is_valid_color, Document, Endpoint, Module, PortDirection, PortKind};
 use crate::queries::{find_module, find_port};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -56,6 +56,10 @@ pub enum IssueCode {
     InvalidDestinationDirection,
     PortKindMismatch,
     ResponseOnEventPort,
+    DuplicateTagId,
+    InvalidTagColor,
+    UnknownTag,
+    DuplicateModuleTag,
     // warnings
     UnconnectedPort,
     DuplicateConnection,
@@ -86,6 +90,10 @@ impl IssueCode {
             IssueCode::InvalidDestinationDirection => "INVALID_DESTINATION_DIRECTION",
             IssueCode::PortKindMismatch => "PORT_KIND_MISMATCH",
             IssueCode::ResponseOnEventPort => "RESPONSE_ON_EVENT_PORT",
+            IssueCode::DuplicateTagId => "DUPLICATE_TAG_ID",
+            IssueCode::InvalidTagColor => "INVALID_TAG_COLOR",
+            IssueCode::UnknownTag => "UNKNOWN_TAG",
+            IssueCode::DuplicateModuleTag => "DUPLICATE_MODULE_TAG",
             IssueCode::UnconnectedPort => "UNCONNECTED_PORT",
             IssueCode::DuplicateConnection => "DUPLICATE_CONNECTION",
         }
@@ -474,6 +482,23 @@ fn check_module_local(doc: &Document, key: &str, module: &Module, ctx: &mut Cont
         }
     }
 
+    let mut tags: HashSet<&str> = HashSet::new();
+    for tag_id in &module.tags {
+        if !tags.insert(tag_id) {
+            ctx.error(
+                IssueCode::DuplicateModuleTag,
+                key,
+                format!("Module \"{key}\" carries tag \"{tag_id}\" more than once."),
+            );
+        } else if doc.find_tag(tag_id).is_none() {
+            ctx.error(
+                IssueCode::UnknownTag,
+                key,
+                format!("Module \"{key}\" carries tag \"{tag_id}\", which is not in the document's tag list."),
+            );
+        }
+    }
+
     let mut pairs: HashSet<String> = HashSet::new();
     for connection in &module.connections {
         let cid = &connection.id;
@@ -619,12 +644,44 @@ fn check_unconnected_ports(doc: &Document, ctx: &mut Context) {
     }
 }
 
+/// Checks the document's tag list: unique, valid IDs and `#rrggbb` colours.
+/// Tag issues belong to no module.
+fn check_tags(doc: &Document, ctx: &mut Context) {
+    let mut seen: HashSet<&str> = HashSet::new();
+    for tag in &doc.tags {
+        let mut push = |code: IssueCode, message: String| {
+            ctx.errors.push(ValidationIssue {
+                severity: Severity::Error,
+                code,
+                message,
+                module_id: None,
+                port_id: None,
+                connection_id: None,
+                layout: IssueLayout::Standard,
+            })
+        };
+        if !seen.insert(&tag.id) {
+            push(IssueCode::DuplicateTagId, format!("The document defines tag \"{}\" more than once.", tag.id));
+        }
+        if !is_valid_id(&tag.id) {
+            push(IssueCode::InvalidId, format!("Tag ID \"{}\" is not a valid ID.", tag.id));
+        }
+        if !is_valid_color(&tag.color) {
+            push(
+                IssueCode::InvalidTagColor,
+                format!("Tag \"{}\" has colour \"{}\"; colours must be #rrggbb.", tag.id, tag.color),
+            );
+        }
+    }
+}
+
 /// Validates the entire document.
 pub fn validate_document(doc: &Document, options: ValidationOptions) -> ValidationResult {
     let mut ctx = Context::default();
     if find_module(doc, &doc.root_id).is_none() {
         ctx.error(IssueCode::RootMissing, &doc.root_id, format!("Root module \"{}\" does not exist.", doc.root_id));
     }
+    check_tags(doc, &mut ctx);
     for (key, module) in doc.modules.iter() {
         check_module_local(doc, key, module, &mut ctx);
     }

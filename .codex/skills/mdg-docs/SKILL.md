@@ -14,6 +14,7 @@ An `.mdg` file is a portable binary document, not a Markdown file to edit direct
 - recursive modules, each with a Markdown description;
 - named input and output ports with Markdown contracts;
 - directed connections describing possible message flow;
+- a document-level list of colored tags that modules can carry (e.g. a status);
 - optional visual layout metadata.
 
 Every port has a kind:
@@ -24,6 +25,17 @@ Every port has a kind:
 Both ends of a connection must be the same kind. A caller may connect to several handlers, just as an event may reach several listeners.
 
 A module's children form its internal graph. Connections at that level may reference the module's own boundary ports or its direct children. Messages cross hierarchy levels through explicit boundary ports.
+
+Tags are labels, typically implementation status. Every document starts with four, which users may rename, recolor, or remove, and may extend with their own:
+
+| ID | Meaning | Color |
+|---|---|---|
+| `done` | done | green |
+| `partially-done` | partially done | yellow |
+| `not-done` | not done | red |
+| `to-implement` | to implement | blue |
+
+A module may carry any number of tags, each at most once. Tags have no effect on message flow or validity beyond referring to tags that exist. Always run `mdg tag list <file>` before relying on a tag: the list is per document, so names, colors, and the set of tags may differ from the defaults.
 
 Treat module and port descriptions as the place for behavior, responsibilities, invariants, ordering, conditions, failures, protocols, and examples. Treat connections only as possible flow: they do not express execution order, branching conditions, or runtime behavior. Layout has no semantic meaning.
 
@@ -56,6 +68,7 @@ mdg outputs <file> <module-id>
 mdg connections <file> <module-id>
 mdg trace <file> <module-id> <port-id>
 mdg trace <file> <module-id> <port-id> --reverse
+mdg tag list <file>
 ```
 
 Use `--json` when results will be parsed or compared programmatically. Use `mdg export <file> --format markdown` only when the task genuinely needs the whole document; prefer `tree` and focused `describe` calls for normal exploration.
@@ -65,6 +78,8 @@ Use `--json` when results will be parsed or compared programmatically. Use `mdg 
 IDs are stable identifiers and are the correct way to address modules, ports, and connections. Commands accept an unambiguous ID prefix, but use the complete ID for edits when practical. Port endpoints use `<module-id>:<port-id>`.
 
 `inputs`, `outputs`, `describe` and `export` mark request ports with a `Kind:` line (`request/response, handled here` for inputs, `sent from here` for outputs) and show their contracts under **Request** and **Response** headings. In `--json` output a request port has `"kind": "request"` and a `response` field; event ports have neither.
+
+`tree` appends `#<tag-id>` to each tagged module, `describe` and `export` add a `- Tags:` line to its identity, and their `--json` output has a `tags` field (omitted for untagged modules). `mdg tag list --json` lists every tag with its color and the IDs of the modules carrying it, which is the quickest way to answer questions such as "what is still to implement?".
 
 `trace` follows connections in their stored direction. For a request port that is caller → handler; the response returns along the same route in reverse, so do not look for separate response connections.
 
@@ -98,6 +113,12 @@ mdg port remove <file> <module-id> <port-id> [--cascade]
 
 mdg connect <file> <from-module>:<from-port> <to-module>:<to-port> [--id <connection-id>]
 mdg disconnect <file> <connection-id>
+
+mdg module tag <file> <module-id> <tag-id>...
+mdg module untag <file> <module-id> <tag-id>...
+mdg tag add <file> --name <name> --color <#rrggbb> --id <tag-id>
+mdg tag update <file> <tag-id> [--name <name>] [--color <#rrggbb>]
+mdg tag remove <file> <tag-id>
 ```
 
 Use `--description-file` (and `--response-file`) for substantial Markdown so shell quoting does not damage formatting. A value of `-` reads the text from standard input.
@@ -109,7 +130,13 @@ Choose the port kind from the interaction, not from habit:
 - `--response` / `--response-file` are only valid with `--kind request`; `set-response` fails on event ports.
 - `set-kind` refuses a connected port (both ends must stay the same kind): disconnect, change the kind on both ends, then reconnect. Switching to `event` discards the response contract.
 
-Documents with request ports are written as schema `1.1.0`; event-only documents stay `1.0.0`.
+Documents with request ports are written as schema `1.1.0`; event-only documents stay `1.0.0`. Documents that tag a module or change the default tag list are written as schema `1.2.0`.
+
+Tag modules to reflect the truth, not intent:
+
+- When you add or substantially change a documented module, keep its status tag accurate if the document uses status tags (e.g. `to-implement` for a designed but unbuilt module, `partially-done` when only part of its documented contracts is implemented, `not-done` when its implementation is missing or does not work, `done` when the implementation matches the documentation). Remove a status tag that no longer holds, so a module never carries contradictory statuses such as `done` and `not-done`.
+- Only tag a module `done` when you have verified that the implementation exists and matches its documented contracts.
+- Do not add, rename, recolor, or remove document tags (`mdg tag add/update/remove`) unless the user asks; the tag list is a project convention. `tag remove` also untags every module carrying it.
 
 Prefer meaningful, stable, lowercase kebab-case IDs when creating them, unless the project already uses another convention. Names are human-facing and may change; IDs should remain stable across renames.
 
@@ -183,6 +210,7 @@ After edits:
 1. Run `mdg validate <file>`; use `--strict` when project policy treats warnings as failures.
 2. Re-read the affected module with `mdg describe`, plus `inputs`, `outputs`, or `connections` as relevant.
 3. Run `mdg trace` for changed routes in both directions when end-to-end connectivity matters.
+   If you changed tags, confirm them with `mdg tag list <file>` or `mdg tree <file> --ids`.
 4. Re-read every port you added or changed (`mdg inputs` / `mdg outputs`) and confirm each event contract, and each request *and* response contract, has a complete schema or an explicit `Schema: TODO`.
 5. Review the repository diff or changed artifact status so only the intended document changed.
 

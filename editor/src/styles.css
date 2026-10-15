@@ -439,9 +439,26 @@ code {
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
 }
 
+/* A tagged node takes its tag colour (mixed for several tags). The colour is
+   blended with the node background so text stays readable in both themes. */
+.mdg-node.tagged {
+  background: color-mix(in srgb, var(--node-tag) 28%, var(--node));
+  border-color: var(--node-tag);
+}
+
+.mdg-node.tagged .mdg-node-title {
+  border-bottom-color: color-mix(in srgb, var(--node-tag) 45%, var(--node));
+}
+
 .mdg-node.selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/* A selected tagged node is outlined in its own colour, not the accent. */
+.mdg-node.tagged.selected {
+  border-color: var(--node-tag);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--node-tag) 45%, transparent);
 }
 
 .mdg-node-title,
@@ -716,4 +733,95 @@ button.request:hover {
 
 .error-text {
   color: var(--danger);
+}
+
+/* ---------- tags ---------- */
+
+/* `--tag` is set per chip from the tag's colour. */
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 7px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--tag) 55%, transparent);
+  background: color-mix(in srgb, var(--tag) 16%, transparent);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.tag-dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tag);
+}
+
+.tag-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+button.tag-toggle {
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  border-color: var(--border);
+  background: none;
+  color: var(--muted);
+}
+
+button.tag-toggle:hover {
+  border-color: var(--tag);
+}
+
+button.tag-toggle.on {
+  border-color: var(--tag);
+  background: color-mix(in srgb, var(--tag) 20%, transparent);
+  color: var(--text);
+}
+
+.mdg-node-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px 10px 0;
+}
+
+.tree-tag {
+  margin-right: 3px;
+}
+
+.tag-editor {
+  list-style: none;
+  margin: 8px 0 12px;
+  padding: 0;
+}
+
+.tag-editor li {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.tag-color {
+  width: 32px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.tag-usage {
+  font-size: 12px;
+  white-space: nowrap;
 }

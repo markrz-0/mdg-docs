@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { commands, portKind, type Module, type Port, type PortDirection, type PortKind } from '../api';
+import { commands, moduleTags, portKind, type Module, type Port, type PortDirection, type PortKind } from '../api';
 import { CommitInput } from '../components/CommitInput';
+import { tagStyle } from '../components/TagChip';
 import { run, useEditor } from '../state/store';
 import { MarkdownField } from './MarkdownField';
 import { RouteDialog } from './RouteDialog';
+import { TagsDialog } from './TagsDialog';
 
 function findPort(module: Module, portId: string): { port: Port; direction: PortDirection } | null {
   const input = module.inputs.find((p) => p.id === portId);
@@ -64,6 +66,48 @@ function PortList({ module, direction }: { module: Module; direction: PortDirect
   );
 }
 
+/** Every document tag as a toggle: pressed when the module carries it. */
+function ModuleTags({ module }: { module: Module }) {
+  const tags = useEditor((s) => s.view.document.tags);
+  const [editing, setEditing] = useState(false);
+  const carried = moduleTags(module);
+  const toggle = (id: string) => {
+    // Keep the document's tag order so chips never jump around.
+    const next = carried.includes(id) ? carried.filter((t) => t !== id) : tags.map((t) => t.id).filter((t) => t === id || carried.includes(t));
+    void run(commands.setModuleTags(module.id, next));
+  };
+  return (
+    <div className="field">
+      <div className="field-header">
+        <span className="field-label">Tags</span>
+        <button className="small" onClick={() => setEditing(true)} data-testid="edit-tags">
+          Edit tags…
+        </button>
+      </div>
+      {tags.length === 0 && <p className="muted">The document has no tags.</p>}
+      <div className="tag-toggles" data-testid="module-tags">
+        {tags.map((tag) => {
+          const on = carried.includes(tag.id);
+          return (
+            <button
+              key={tag.id}
+              className={`tag-chip tag-toggle${on ? ' on' : ''}`}
+              style={tagStyle(tag)}
+              aria-pressed={on}
+              onClick={() => toggle(tag.id)}
+              data-testid={`module-tag-${tag.id}`}
+            >
+              <span className="tag-dot" />
+              {tag.name}
+            </button>
+          );
+        })}
+      </div>
+      {editing && <TagsDialog onClose={() => setEditing(false)} />}
+    </div>
+  );
+}
+
 function ModuleDetails({ module }: { module: Module }) {
   const title = useEditor((s) => s.view.document.title);
   const currentModuleId = useEditor((s) => s.view.currentModuleId);
@@ -92,6 +136,7 @@ function ModuleDetails({ module }: { module: Module }) {
         <span className="field-label">ID</span>
         <code data-testid="module-id">{module.id}</code>
       </div>
+      <ModuleTags module={module} />
       <div className="field">
         <span className="field-label">Description</span>
         <MarkdownField

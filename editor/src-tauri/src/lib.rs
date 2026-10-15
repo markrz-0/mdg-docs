@@ -6,8 +6,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use mdg_core::{
-    rename_module, rename_port, set_port_kind, update_metadata, update_module_description, update_port_description,
-    update_port_response, Endpoint, PortDirection, PortKind, Position,
+    add_tag, move_tag, remove_tag, rename_module, rename_port, set_module_tags, set_port_kind, update_metadata,
+    update_module_description, update_port_description, update_port_response, update_tag, AddTagOptions, Endpoint,
+    PortDirection, PortKind, Position,
 };
 use mdg_session::{ConnectRole, RouteChoices, RouteMode, RoutePreview, RouteRequest, Selection, Session, View};
 use serde::{Deserialize, Serialize};
@@ -204,6 +205,44 @@ fn delete_selection(state: Shared<'_>) -> View {
     })
 }
 
+#[tauri::command]
+fn set_module_tags_cmd(state: Shared<'_>, module_id: String, tags: Vec<String>) -> View {
+    with(&state, |s| {
+        s.apply(None, |d| set_module_tags(d, &module_id, &tags));
+    })
+}
+
+#[tauri::command]
+fn add_tag_cmd(state: Shared<'_>, name: String, color: String) -> View {
+    with(&state, |s| {
+        s.apply(None, |d| Ok(add_tag(d, AddTagOptions { name, color, ..Default::default() })?.document));
+    })
+}
+
+/// Renames a tag or changes its colour. Dragging through the colour picker
+/// coalesces into one undo step.
+#[tauri::command]
+fn update_tag_cmd(state: Shared<'_>, tag_id: String, name: Option<String>, color: Option<String>) -> View {
+    let key = color.is_some().then(|| format!("tag-color:{tag_id}"));
+    with(&state, |s| {
+        s.apply(key.as_deref(), |d| update_tag(d, &tag_id, name.as_deref(), color.as_deref()));
+    })
+}
+
+#[tauri::command]
+fn move_tag_cmd(state: Shared<'_>, tag_id: String, index: usize) -> View {
+    with(&state, |s| {
+        s.apply(None, |d| move_tag(d, &tag_id, index));
+    })
+}
+
+#[tauri::command]
+fn remove_tag_cmd(state: Shared<'_>, tag_id: String) -> View {
+    with(&state, |s| {
+        s.apply(None, |d| remove_tag(d, &tag_id));
+    })
+}
+
 // ---------------------------------------------------------------- layout
 
 #[tauri::command]
@@ -272,6 +311,11 @@ pub fn run() {
             set_port_description,
             set_port_response,
             set_port_kind_cmd,
+            set_module_tags_cmd,
+            add_tag_cmd,
+            update_tag_cmd,
+            move_tag_cmd,
+            remove_tag_cmd,
             add_child_module,
             add_port,
             connect,

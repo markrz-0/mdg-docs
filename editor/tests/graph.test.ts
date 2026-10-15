@@ -2,7 +2,7 @@ import type { Edge } from '@xyflow/react';
 import { describe, expect, it } from 'vitest';
 import type { Selection, View } from '../src/api';
 import { layoutAll, layoutChildren } from '../src/graph/autoLayout';
-import { BOUNDARY_IN, BOUNDARY_OUT, buildGraph } from '../src/graph/buildGraph';
+import { BOUNDARY_IN, BOUNDARY_OUT, buildGraph, mixColors } from '../src/graph/buildGraph';
 import { boundaryKey } from '../src/state/layoutKeys';
 import fixture from './fixtures/authentication.view.json';
 
@@ -24,6 +24,37 @@ describe('buildGraph', () => {
     expect(request).toMatchObject({ source: BOUNDARY_IN, sourceHandle: 'get-profile', target: 'protected-endpoint' });
     const out = edges.find((e) => e.id === 'routes-validate-token')!;
     expect(out).toMatchObject({ source: 'protected-endpoint', target: BOUNDARY_OUT, targetHandle: 'validate-token' });
+  });
+
+  it('shows the tags a module carries, in its own order', () => {
+    expect(doc.tags.map((t) => t.id)).toEqual(['done', 'partially-done', 'not-done', 'to-implement']);
+    const tagged = {
+      ...doc,
+      modules: { ...doc.modules, frontend: { ...doc.modules.frontend!, tags: ['partially-done', 'done'] } },
+    };
+    const { nodes } = buildGraph(tagged, 'application', view.positions, null);
+    const tagsOf = (id: string) => {
+      const node = nodes.find((n) => n.id === id)!;
+      return node.type === 'module' ? node.data.tags.map((t) => [t.id, t.color]) : null;
+    };
+    expect(tagsOf('frontend')).toEqual([
+      ['partially-done', '#d4a017'],
+      ['done', '#2a8a4a'],
+    ]);
+    expect(tagsOf('api-service')).toEqual([]);
+    const colorOf = (id: string) => {
+      const node = nodes.find((n) => n.id === id)!;
+      return node.type === 'module' ? node.data.color : undefined;
+    };
+    expect(colorOf('frontend')).toBe(mixColors(['#d4a017', '#2a8a4a']));
+    expect(colorOf('api-service')).toBeNull();
+  });
+
+  it('colours a node by its tag, mixing several tags', () => {
+    expect(mixColors([])).toBeNull();
+    expect(mixColors(['#c43b3b'])).toBe('#c43b3b');
+    expect(mixColors(['#ff0000', '#0000ff'])).toBe('#800080');
+    expect(mixColors(['#000000', '#ffffff', '#ffffff'])).toBe('#aaaaaa');
   });
 
   it('tells request/response ports and connections apart from events', () => {

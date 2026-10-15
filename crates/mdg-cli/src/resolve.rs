@@ -38,6 +38,11 @@ pub fn resolve_port_id(doc: &Document, module_id: &str, input: &str) -> Result<S
     )
 }
 
+pub fn resolve_tag_id(doc: &Document, input: &str) -> Result<String> {
+    let ids: Vec<&str> = doc.tags.iter().map(|t| t.id.as_str()).collect();
+    resolve("Tag", input, &ids, "Run `mdg tag list <file>` to list tag IDs.")
+}
+
 /// Parses and resolves `module:port`.
 pub fn resolve_endpoint(doc: &Document, spec: &str) -> Result<Endpoint> {
     let invalid = || MdgError::argument(format!("Invalid endpoint \"{spec}\". Use <module-id>:<port-id>."));

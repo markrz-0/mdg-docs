@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { commands, type DocumentView } from '../api';
-import { getModule } from '../graph/buildGraph';
+import { tagStyle } from '../components/TagChip';
+import { getModule, resolveTags } from '../graph/buildGraph';
 import { run, useEditor } from '../state/store';
 
 interface ItemProps {
@@ -53,6 +54,9 @@ function TreeItem({ doc, moduleId, depth, expanded, toggle }: ItemProps) {
         >
           {module.name}
         </button>
+        {resolveTags(doc, module).map((tag) => (
+          <span key={tag.id} className="tag-dot tree-tag" style={tagStyle(tag)} title={tag.name} />
+        ))}
       </div>
       {isOpen && module.childIds.length > 0 && (
         <ul>

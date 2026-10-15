@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { commands } from '../api';
 import type { useFileActions } from '../hooks/useFileActions';
+import { TagsDialog } from '../panels/TagsDialog';
 import { run, useEditor } from '../state/store';
 
 function Breadcrumbs() {
@@ -29,6 +31,7 @@ export function TopBar({ files }: { files: ReturnType<typeof useFileActions> }) 
   const dirty = useEditor((s) => s.view.dirty);
   const canUndo = useEditor((s) => s.view.canUndo);
   const canRedo = useEditor((s) => s.view.canRedo);
+  const [editingTags, setEditingTags] = useState(false);
   return (
     <header className="topbar">
       <div className="topbar-row">
@@ -66,12 +69,16 @@ export function TopBar({ files }: { files: ReturnType<typeof useFileActions> }) 
             Redo
           </button>
           <span className="toolbar-sep" />
+          <button onClick={() => setEditingTags(true)} title="Edit the document's tags" data-testid="tags">
+            Tags…
+          </button>
           <button className="primary" onClick={() => void run(commands.addChildModule())} data-testid="add-module">
             + Module
           </button>
         </div>
       </div>
       <Breadcrumbs />
+      {editingTags && <TagsDialog onClose={() => setEditingTags(false)} />}
     </header>
   );
 }

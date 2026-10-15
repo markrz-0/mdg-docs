@@ -307,6 +307,7 @@ fn detects_inconsistent_parent_child_links_and_missing_references() {
             outputs: vec![],
             child_ids: vec![],
             connections: vec![],
+            tags: vec![],
         }),
     );
     let found = error_codes(&doc);

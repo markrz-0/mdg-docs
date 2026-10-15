@@ -69,6 +69,8 @@ pub fn run_cli(argv: &[String], io: &mut dyn CliIo) -> i32 {
         Action::ModuleRename => edit::module_rename(&mut ctx, &parsed),
         Action::ModuleMove => edit::module_move(&mut ctx, &parsed),
         Action::ModuleSetDescription => edit::module_set_description(&mut ctx, &parsed),
+        Action::ModuleTag => edit::module_tag(&mut ctx, &parsed, true),
+        Action::ModuleUntag => edit::module_tag(&mut ctx, &parsed, false),
         Action::PortAdd => edit::port_add(&mut ctx, &parsed),
         Action::PortRemove => edit::port_remove(&mut ctx, &parsed),
         Action::PortRename => edit::port_rename(&mut ctx, &parsed),
@@ -77,6 +79,10 @@ pub fn run_cli(argv: &[String], io: &mut dyn CliIo) -> i32 {
         Action::PortSetKind => edit::port_set_kind(&mut ctx, &parsed),
         Action::Connect => edit::connect(&mut ctx, &parsed),
         Action::Disconnect => edit::disconnect(&mut ctx, &parsed),
+        Action::TagList => inspect::tag_list(&mut ctx, &parsed),
+        Action::TagAdd => edit::tag_add(&mut ctx, &parsed),
+        Action::TagUpdate => edit::tag_update(&mut ctx, &parsed),
+        Action::TagRemove => edit::tag_remove(&mut ctx, &parsed),
     };
     match result {
         Ok(()) => ctx.exit_code,
