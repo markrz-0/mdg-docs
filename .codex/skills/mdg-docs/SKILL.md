@@ -123,6 +123,59 @@ For request ports the source is the caller and the target is the handler; both m
 
 Use `--dry-run` before structural, routed, cascading, or otherwise broad edits. Removal is deliberately safe by default: only use `--cascade` when removing descendants or referencing connections is explicitly intended and the impact has been inspected.
 
+## Specify the payload schema of every contract
+
+Every port contract MUST state the exact shape of what travels through it, in the format the system actually uses. This applies to both kinds:
+
+- **event port:** the schema of the event message (its description);
+- **request port:** the schema of the request (its description) **and** the schema of the response (its response contract). Both are required; a response contract that only says "the result" is incomplete.
+
+Each schema must be specific enough that someone could implement either side from it alone:
+
+- **Format and transport framing:** name it explicitly, e.g. JSON body, `application/x-www-form-urlencoded`, HTML page, Protobuf message, CSV row, plain text, binary blob, CLI arguments. For HTTP include method, path, path/query parameters, and relevant headers; for queues/topics include the topic or channel name.
+- **Every field:** name, type, **required or optional**, allowed values or format (enum, pattern, units, ranges, encoding such as ISO 8601 or UUID), nullability, and default when omitted. Nest structures fully; do not write "user object" without defining it.
+- **Every outcome (responses):** each success and failure variant with its own shape and how the caller tells them apart (HTTP status, `type` discriminator, error code list).
+- **Constraints that matter on the wire:** size limits, ordering of collections, idempotency keys, versioning.
+
+Prefer the project's real definitions: if a JSON Schema, OpenAPI spec, `.proto`, TypeScript type, or DTO class exists, reproduce the relevant part (or a faithful excerpt) and name its source path. Otherwise write a schema block yourself. Use a fenced block whose language matches the format (`json`, `jsonc` with comments marking optional fields, `typescript`, `proto`, `html`, …), followed by a field table when a block alone cannot express required/optional or constraints:
+
+````markdown
+`POST /login`, `Content-Type: application/json`
+
+```jsonc
+{
+  "username": "string",   // required, 3–64 chars, case-insensitive
+  "password": "string",   // required, 8–128 chars
+  "remember": true        // optional boolean, default false
+}
+```
+````
+
+and the matching response contract:
+
+````markdown
+`200 OK`, `application/json`:
+
+```jsonc
+{
+  "token": "string",      // required, signed JWT (RS256)
+  "expiresAt": "string"   // required, ISO 8601 UTC timestamp
+}
+```
+
+`401 Unauthorized`, `application/json`:
+
+```jsonc
+{ "error": "invalid_credentials" | "account_locked" }   // required
+```
+````
+
+For non-JSON payloads be equally exact, e.g. an HTML response names the document type, the elements and attributes consumers depend on, and the encoding; a plain-text event names the line format and the encoding.
+
+If the schema genuinely cannot be determined from the code, specs, or the user, do not invent fields. Write what is known, and add an explicit `**Schema: TODO** — <what is missing and where to find it>` line. Then tell the user which contracts are incomplete. When editing an existing port whose contract lacks a schema, add one if the information is available.
+
+Because schemas are long, write them with `--description-file` / `--response-file` rather than inline flags.
+
 ## Verify every change
 
 After edits:
@@ -130,14 +183,16 @@ After edits:
 1. Run `mdg validate <file>`; use `--strict` when project policy treats warnings as failures.
 2. Re-read the affected module with `mdg describe`, plus `inputs`, `outputs`, or `connections` as relevant.
 3. Run `mdg trace` for changed routes in both directions when end-to-end connectivity matters.
-4. Review the repository diff or changed artifact status so only the intended document changed.
+4. Re-read every port you added or changed (`mdg inputs` / `mdg outputs`) and confirm each event contract, and each request *and* response contract, has a complete schema or an explicit `Schema: TODO`.
+5. Review the repository diff or changed artifact status so only the intended document changed.
 
 MDG edits are validated before being written and are saved atomically, but this does not replace semantic review. A structurally valid document can still describe the wrong system.
 
 ## Keep documentation useful
 
 - Describe a module's responsibility and boundaries, not its source code line by line.
-- Make each port contract state what the message represents and any important guarantees, required data, or failure meaning. For request ports, put what the caller sends in the request contract and every possible answer (including errors) in the response contract.
+- Make each port contract state what the message represents, its full payload schema (see above), and any important guarantees or failure meaning. For request ports, put what the caller sends in the request contract and every possible answer (including errors) in the response contract.
+- Keep the schemas on both ends of a connection consistent: a caller's request and response contracts must match the handler's, and an emitted event must match what its listeners expect. When they intentionally differ (e.g. a boundary port that adds or strips fields), say so.
 - Put ordering and conditional behavior in Markdown descriptions rather than inferring it from graph layout.
 - Reuse existing concepts and terminology from the document and codebase.
 - Preserve unrelated descriptions, IDs, extensions, and layout.
