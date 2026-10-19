@@ -13,7 +13,7 @@ fn backward() -> TraceOptions {
 
 #[test]
 fn example_is_structurally_valid_without_warnings() {
-    let result = validate_document(&create_authentication_example(), ValidationOptions::default());
+    let result = validate_document(&create_authentication_example_v1(), ValidationOptions::default());
     assert_eq!(result.errors, vec![]);
     assert_eq!(result.warnings, vec![]);
 }
@@ -22,7 +22,7 @@ fn example_is_structurally_valid_without_warnings() {
 
 #[test]
 fn traces_forward_across_parent_boundaries() {
-    let doc = create_authentication_example();
+    let doc = create_authentication_example_v1();
     let result = trace(&doc, "protected-endpoint", "token-validation-request", TraceOptions::default()).unwrap();
     assert_eq!(result.routes.len(), 1);
     assert_eq!(
@@ -41,7 +41,7 @@ fn traces_forward_across_parent_boundaries() {
 
 #[test]
 fn traces_the_response_backwards() {
-    let doc = create_authentication_example();
+    let doc = create_authentication_example_v1();
     let result = trace(&doc, "protected-endpoint", "token-validation-result", backward()).unwrap();
     assert_eq!(
         hop_ids(&result.routes[0].hops),
@@ -56,7 +56,7 @@ fn traces_the_response_backwards() {
 
 #[test]
 fn reports_multiple_routes() {
-    let doc = create_authentication_example();
+    let doc = create_authentication_example_v1();
     let result = trace(&doc, "api-service", "login-response", backward()).unwrap();
     let ends: Vec<String> = result.routes.iter().map(|r| hop_ids(&r.hops).pop().unwrap()).collect();
     assert_eq!(ends, vec!["token-issuer:token-issued", "credential-validator:credentials-invalid"]);
@@ -103,7 +103,7 @@ fn caps_routes_and_flags_truncation() {
 
 #[test]
 fn describes_public_contracts_only_at_depth_0() {
-    let doc = create_authentication_example();
+    let doc = create_authentication_example_v1();
     let md = describe_module_markdown(&doc, "authentication", Some(0)).unwrap();
     assert!(
         md.contains("# Authentication\n\n## Identity\n- ID: `authentication`\n- Parent: API Service (`api-service`)")
@@ -115,7 +115,7 @@ fn describes_public_contracts_only_at_depth_0() {
 
 #[test]
 fn includes_children_and_internal_connections_at_depth_1() {
-    let doc = create_authentication_example();
+    let doc = create_authentication_example_v1();
     let result = describe_module(&doc, "authentication", Some(1)).unwrap();
     let children: Vec<&str> = result.module.children.as_ref().unwrap().iter().map(|c| c.id.as_str()).collect();
     assert_eq!(children, vec!["credential-validator", "token-issuer"]);
@@ -133,7 +133,7 @@ fn includes_children_and_internal_connections_at_depth_1() {
 
 #[test]
 fn describes_recursively_to_depth_n() {
-    let doc = create_authentication_example();
+    let doc = create_authentication_example_v1();
     let result = describe_module(&doc, "api-service", Some(2)).unwrap();
     let got: Vec<(&str, usize)> = result.descendants.iter().map(|d| (d.id.as_str(), d.depth)).collect();
     assert_eq!(
@@ -150,7 +150,7 @@ fn describes_recursively_to_depth_n() {
 
 #[test]
 fn exports_the_whole_hierarchy_and_per_module_files() {
-    let doc = create_authentication_example();
+    let doc = create_authentication_example_v1();
     let md = export_document_markdown(&doc).unwrap();
     for m in doc.modules.values() {
         assert!(md.contains(&format!("# {}\n", m.name)));
@@ -167,7 +167,7 @@ fn exports_the_whole_hierarchy_and_per_module_files() {
 
 #[test]
 fn renders_trees() {
-    let doc = create_authentication_example();
+    let doc = create_authentication_example_v1();
     assert_eq!(
         render_tree(&doc, &TreeOptions::default()).unwrap(),
         [

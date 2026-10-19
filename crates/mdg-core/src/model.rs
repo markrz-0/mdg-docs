@@ -15,8 +15,15 @@ use serde_json::Value;
 
 use crate::jsmap::JsMap;
 
-/// Current schema (data model) version written by this implementation.
+/// Schema (data model) version of new documents. Documents that use no 1.1
+/// features keep this version, so they stay readable by 1.0 readers.
 pub const SCHEMA_VERSION: &str = "1.0.0";
+/// Schema version that introduced request/response ports. Written whenever a
+/// document contains one.
+pub const REQUEST_PORTS_SCHEMA_VERSION: &str = "1.1.0";
+/// Schema version that introduced module tags. Written whenever a document
+/// tags a module or changes the default tag list.
+pub const TAGS_SCHEMA_VERSION: &str = "1.2.0";
 /// Schema major version this implementation understands.
 pub const SCHEMA_MAJOR: f64 = 1.0;
 
@@ -43,15 +50,54 @@ impl std::fmt::Display for PortDirection {
     }
 }
 
+/// What travels through a port.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PortKind {
+    /// A one-way message: outputs emit it, inputs listen for it.
+    #[default]
+    Event,
+    /// A request answered by a response over the same connection. An output
+    /// sends the request (the caller); an input handles it (the handler). The
+    /// connection runs caller → handler; the response flows back implicitly.
+    Request,
+}
+
+impl PortKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PortKind::Event => "event",
+            PortKind::Request => "request",
+        }
+    }
+
+    pub fn is_event(&self) -> bool {
+        *self == PortKind::Event
+    }
+}
+
+impl std::fmt::Display for PortKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A named input or output on a module boundary.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Port {
     /// Stable ID, unique within its module (inputs and outputs share one namespace).
     pub id: String,
     /// Human-readable name. Not required to be unique.
     pub name: String,
-    /// Natural-language Markdown contract.
+    /// Omitted from JSON for events, so event-only output is unchanged.
+    #[serde(default, skip_serializing_if = "PortKind::is_event")]
+    pub kind: PortKind,
+    /// Natural-language Markdown contract. For a request port: the request.
     pub description: String,
+    /// Request ports only: Markdown contract of the response. Always empty
+    /// on event ports.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub response: String,
 }
 
 /// A reference to a port on a module.
@@ -100,6 +146,10 @@ pub struct Module {
     pub child_ids: Vec<String>,
     /// Connections in this module's internal graph.
     pub connections: Vec<Connection>,
+    /// IDs of the document tags attached to this module, in display order.
+    /// Omitted from JSON when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 impl Module {
@@ -120,6 +170,83 @@ impl Module {
     /// Inputs then outputs.
     pub fn all_ports(&self) -> impl Iterator<Item = &Port> {
         self.inputs.iter().chain(self.outputs.iter())
+    }
+}
+
+/// A document-level label that modules can carry (e.g. a status such as
+/// "done"). The list of tags lives on the document; modules reference tags
+/// by ID.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Tag {
+    /// Stable ID, unique within the document.
+    pub id: String,
+    /// Human-readable name. Not required to be unique.
+    pub name: String,
+    /// Display colour as `#rrggbb`.
+    pub color: String,
+}
+
+impl Tag {
+    pub fn new(id: impl Into<String>, name: impl Into<String>, color: impl Into<String>) -> Self {
+        Tag { id: id.into(), name: name.into(), color: color.into() }
+    }
+}
+
+/// Tags every new document starts with, and the tag list of documents
+/// written before schema 1.2 (which have no tag list of their own).
+pub fn default_tags() -> Vec<Tag> {
+    vec![
+        Tag::new("done", "done", "#2a8a4a"),
+        Tag::new("partially-done", "partially done", "#d4a017"),
+        Tag::new("not-done", "not done", "#c43b3b"),
+        Tag::new("to-implement", "to implement", "#3b6fd8"),
+    ]
+}
+
+/// True for a `#rrggbb` colour (hex digits in either case).
+pub fn is_valid_color(color: &str) -> bool {
+    let bytes = color.as_bytes();
+    bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(u8::is_ascii_hexdigit)
+}
+
+impl Document {
+    /// True when any module has a request port (a schema 1.1 feature).
+    pub fn has_request_ports(&self) -> bool {
+        self.modules.values().any(|m| m.all_ports().any(|p| p.kind == PortKind::Request))
+    }
+
+    /// True when the document uses tags in a way only schema 1.2 can store:
+    /// a tagged module, or a tag list other than [`default_tags`].
+    pub fn has_custom_tags(&self) -> bool {
+        self.modules.values().any(|m| !m.tags.is_empty()) || self.tags != default_tags()
+    }
+
+    pub fn find_tag(&self, tag_id: &str) -> Option<&Tag> {
+        self.tags.iter().find(|t| t.id == tag_id)
+    }
+}
+
+/// The schema version to write for `doc`: its own version, raised to the
+/// lowest version that can hold the features it uses (request ports need
+/// 1.1, tags need 1.2).
+pub fn schema_version_for(doc: &Document) -> String {
+    let minor = {
+        let mut parts = doc.format_version.split('.').map(|p| p.parse::<u64>().ok());
+        match (parts.next(), parts.next()) {
+            (Some(Some(1)), Some(Some(minor))) => Some(minor),
+            _ => None,
+        }
+    };
+    let required = if doc.has_custom_tags() {
+        Some((2, TAGS_SCHEMA_VERSION))
+    } else if doc.has_request_ports() {
+        Some((1, REQUEST_PORTS_SCHEMA_VERSION))
+    } else {
+        None
+    };
+    match (minor, required) {
+        (Some(minor), Some((needed, version))) if minor < needed => version.to_string(),
+        _ => doc.format_version.clone(),
     }
 }
 
@@ -175,6 +302,9 @@ pub struct Document {
     pub root_id: String,
     pub modules: JsMap<Arc<Module>>,
     pub metadata: Metadata,
+    /// Tags modules can carry. Documents without a stored tag list (schema
+    /// before 1.2) get [`default_tags`].
+    pub tags: Vec<Tag>,
     /// Optional presentation metadata (node positions).
     pub layout: Option<Layout>,
     /// Unknown optional top-level index fields, preserved verbatim.

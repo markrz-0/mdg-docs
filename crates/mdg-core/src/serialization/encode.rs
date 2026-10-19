@@ -4,14 +4,15 @@
 //! - modules (in the index and as content blocks) sorted by module ID, using
 //!   UTF-16 code-unit order;
 //! - per module, content blocks are: description, inputs in stored order,
-//!   outputs in stored order;
+//!   outputs in stored order (a request port's response follows its
+//!   description);
 //! - ports, child IDs and connections keep their stored order;
 //! - layout positions, unknown metadata and extension keys sorted by key.
 //!
 //! No timestamps or random values are written, so an unchanged document
 //! always serializes to identical bytes. The index JSON is written exactly
-//! like `JSON.stringify`, so files are byte-identical with the original
-//! TypeScript implementation.
+//! like `JSON.stringify`, so documents without request ports are
+//! byte-identical with the original TypeScript implementation.
 
 use std::collections::HashSet;
 
@@ -19,13 +20,14 @@ use serde_json::{json, Map, Value};
 
 use super::decode::schema_major;
 use super::format::{
-    module_content_id, port_content_id, CONTAINER_MAJOR, CONTAINER_MINOR, CONTENT_ENCODING, HEADER_SIZE, MAGIC_BYTES,
+    module_content_id, port_content_id, port_response_content_id, CONTAINER_MAJOR, CONTAINER_MINOR, CONTENT_ENCODING,
+    HEADER_SIZE, MAGIC_BYTES,
 };
 use super::index::KNOWN_INDEX_KEYS;
 use crate::error::{MdgError, Result};
 use crate::js::{self, compare_utf16};
 use crate::jsmap::JsMap;
-use crate::model::{Document, Port, Position, SCHEMA_MAJOR};
+use crate::model::{schema_version_for, Document, Port, PortKind, Position, SCHEMA_MAJOR};
 use crate::ops::assert_valid;
 
 #[derive(Debug, Clone, Copy)]
@@ -80,6 +82,9 @@ pub fn encode_mdg(doc: &Document, options: EncodeOptions) -> Result<Vec<u8>> {
         assert_valid(doc)?;
     }
 
+    // Request ports need schema 1.1; never write a version that cannot hold them.
+    let schema_version = schema_version_for(doc);
+
     let mut blocks: Vec<Block> = Vec::new();
     let mut refs: HashSet<String> = HashSet::new();
     let mut add_block = |reference: String, text: &str| -> Result<String> {
@@ -95,11 +100,18 @@ pub fn encode_mdg(doc: &Document, options: EncodeOptions) -> Result<Vec<u8>> {
         let m = &doc.modules.get(id).expect("key exists");
         let description_ref = add_block(module_content_id(id), &m.description)?;
         let mut port = |p: &Port| -> Result<Value> {
-            Ok(json!({
-                "id": p.id,
-                "name": p.name,
-                "descriptionRef": add_block(port_content_id(id, &p.id), &p.description)?,
-            }))
+            let mut record = Map::new();
+            record.insert("id".into(), json!(p.id));
+            record.insert("name".into(), json!(p.name));
+            if p.kind == PortKind::Request {
+                record.insert("kind".into(), json!(p.kind));
+            }
+            record.insert("descriptionRef".into(), json!(add_block(port_content_id(id, &p.id), &p.description)?));
+            if p.kind == PortKind::Request {
+                record
+                    .insert("responseRef".into(), json!(add_block(port_response_content_id(id, &p.id), &p.response)?));
+            }
+            Ok(Value::Object(record))
         };
         let inputs = m.inputs.iter().map(&mut port).collect::<Result<Vec<_>>>()?;
         let outputs = m.outputs.iter().map(&mut port).collect::<Result<Vec<_>>>()?;
@@ -114,19 +126,20 @@ pub fn encode_mdg(doc: &Document, options: EncodeOptions) -> Result<Vec<u8>> {
                 })
             })
             .collect();
-        modules.insert(
-            id.to_string(),
-            json!({
-                "id": m.id,
-                "parentId": m.parent_id,
-                "name": m.name,
-                "descriptionRef": description_ref,
-                "inputs": inputs,
-                "outputs": outputs,
-                "childIds": m.child_ids,
-                "connections": connections,
-            }),
-        );
+        let mut record = json!({
+            "id": m.id,
+            "parentId": m.parent_id,
+            "name": m.name,
+            "descriptionRef": description_ref,
+            "inputs": inputs,
+            "outputs": outputs,
+            "childIds": m.child_ids,
+            "connections": connections,
+        });
+        if !m.tags.is_empty() {
+            record["tags"] = json!(m.tags);
+        }
+        modules.insert(id.to_string(), record);
     }
 
     let mut metadata = Map::new();
@@ -168,6 +181,12 @@ pub fn encode_mdg(doc: &Document, options: EncodeOptions) -> Result<Vec<u8>> {
         Value::Object(out)
     });
 
+    // The default tag list is implied when absent, so documents that do not
+    // use tags stay byte-identical with schema 1.0/1.1 writers.
+    let tags = doc.has_custom_tags().then(|| {
+        Value::Array(doc.tags.iter().map(|t| json!({ "id": t.id, "name": t.name, "color": t.color })).collect())
+    });
+
     let extensions: Vec<(String, Value)> = match &doc.extensions {
         None => vec![],
         Some(ext) => sorted_keys(ext)
@@ -198,13 +217,16 @@ pub fn encode_mdg(doc: &Document, options: EncodeOptions) -> Result<Vec<u8>> {
             })
             .collect();
         let mut index = Map::new();
-        index.insert("schemaVersion".into(), Value::String(doc.format_version.clone()));
+        index.insert("schemaVersion".into(), Value::String(schema_version.clone()));
         index.insert("rootId".into(), Value::String(doc.root_id.clone()));
         index.insert("metadata".into(), metadata.clone());
         index.insert("modules".into(), modules.clone());
         index.insert("content".into(), Value::Object(content));
         if let Some(layout) = &layout {
             index.insert("layout".into(), layout.clone());
+        }
+        if let Some(tags) = &tags {
+            index.insert("tags".into(), tags.clone());
         }
         for (key, value) in &extensions {
             index.insert(key.clone(), value.clone());

@@ -52,10 +52,10 @@ fn small_doc(title: &str) -> Document {
 fn setup(kind: &str, dir: &Path) {
     match kind {
         "none" => {}
-        "example" => write(dir, "arch.mdg", &create_authentication_example()),
+        "example" => write(dir, "arch.mdg", &create_authentication_example_v1()),
         "bad" => {
-            write(dir, "arch.mdg", &create_authentication_example());
-            let mut doc = create_authentication_example();
+            write(dir, "arch.mdg", &create_authentication_example_v1());
+            let mut doc = create_authentication_example_v1();
             let mut app = (**doc.modules.get("application").unwrap()).clone();
             app.child_ids = vec!["frontend".into(), "api-service".into()];
             doc.modules.insert("application", Arc::new(app));
@@ -111,7 +111,7 @@ fn setup(kind: &str, dir: &Path) {
             write(dir, "num.mdg", &doc);
         }
         "description" => {
-            write(dir, "arch.mdg", &create_authentication_example());
+            write(dir, "arch.mdg", &create_authentication_example_v1());
             std::fs::write(dir.join("desc.md"), "# From file\n\nLoaded from **disk**.\n").unwrap();
         }
         other => panic!("unknown setup {other}"),
@@ -151,6 +151,26 @@ fn normalize(text: &str, dir: &Path) -> String {
     out
 }
 
+/// Cases whose help text lists commands and options the TypeScript CLI never
+/// had (request/response ports, tags). Only their output text is exempt; exit
+/// codes are still compared. The new commands are covered in `cli.rs`.
+const EXTENDED_HELP: [&str; 14] = [
+    "port without subcommand",
+    "port help flag",
+    "help port add",
+    "help",
+    "help short",
+    "help command",
+    "no arguments",
+    "help for module via help",
+    "help for unknown via help",
+    "help module add via help",
+    "module without subcommand",
+    "module help flag",
+    "module help command",
+    "help before command",
+];
+
 #[test]
 fn matches_the_typescript_cli() {
     let corpus =
@@ -181,6 +201,9 @@ fn matches_the_typescript_cli() {
             let label = format!("[{}] mdg {}", case.name, step.args.join(" "));
             if code != expected.code {
                 failures.push(format!("{label}\n  exit code {code}, expected {}", expected.code));
+            }
+            if EXTENDED_HELP.contains(&case.name.as_str()) {
+                continue;
             }
             if stdout != expected.stdout {
                 failures.push(format!("{label}\n  stdout:\n{stdout}\n  expected:\n{}", expected.stdout));

@@ -6,6 +6,9 @@
   --muted: #6b7385;
   --accent: #3b6fd8;
   --accent-soft: #e6eefc;
+  /* Request/response ports and connections (events use --accent). */
+  --request: #23884a;
+  --request-soft: #e2f4e8;
   --danger: #c43b3b;
   --ok: #2a8a4a;
   --node: #ffffff;
@@ -29,6 +32,8 @@
     --muted: #8d95a7;
     --accent: #6d9cf5;
     --accent-soft: #23314d;
+    --request: #57c27c;
+    --request-soft: #1d3a29;
     --danger: #ef6d6d;
     --ok: #57c27c;
     --node: #232833;
@@ -176,11 +181,28 @@ code {
 
 .workspace {
   display: grid;
-  grid-template-columns: 240px 1fr 340px;
+  /* Columns (panel widths and splitters) are set inline by App. */
   min-height: 0;
 }
 
+.splitter {
+  width: 5px;
+  margin: 0 -2px;
+  position: relative;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+  transition: background 0.1s;
+}
+
+.splitter:hover,
+.splitter.dragging {
+  background: var(--accent);
+}
+
 .panel {
+  min-width: 0;
   background: var(--panel);
   overflow: auto;
   padding: 10px 12px;
@@ -417,9 +439,26 @@ code {
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
 }
 
+/* A tagged node takes its tag colour (mixed for several tags). The colour is
+   blended with the node background so text stays readable in both themes. */
+.mdg-node.tagged {
+  background: color-mix(in srgb, var(--node-tag) 28%, var(--node));
+  border-color: var(--node-tag);
+}
+
+.mdg-node.tagged .mdg-node-title {
+  border-bottom-color: color-mix(in srgb, var(--node-tag) 45%, var(--node));
+}
+
 .mdg-node.selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/* A selected tagged node is outlined in its own colour, not the accent. */
+.mdg-node.tagged.selected {
+  border-color: var(--node-tag);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--node-tag) 45%, transparent);
 }
 
 .mdg-node-title,
@@ -504,11 +543,51 @@ code {
   stroke-width: 2.5;
 }
 
+/* Request/response connections highlight green instead of blue. */
+.react-flow__edge.request.highlighted .react-flow__edge-path,
+.react-flow__edge.request.selected .react-flow__edge-path {
+  stroke: var(--request);
+}
+
 .react-flow__handle {
   width: 9px;
   height: 9px;
   background: var(--panel);
   border: 2px solid var(--accent);
+}
+
+.react-flow__handle.mdg-handle-request {
+  border-color: var(--request);
+}
+
+.port-label.request:hover,
+.port-label.request.selected {
+  background: var(--request-soft);
+  color: var(--request);
+}
+
+/* Port kind marker: → for events (blue), ⇄ for requests (green). */
+.port-kind {
+  color: var(--accent);
+  margin-right: 4px;
+}
+
+.port-label.request .port-kind {
+  color: var(--request);
+}
+
+.kind-badge {
+  font-size: 10px;
+  border-radius: 8px;
+  padding: 0 6px;
+  margin-left: 6px;
+  background: var(--request-soft);
+  color: var(--request);
+}
+
+.kind-badge.event {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 button:disabled {
@@ -522,9 +601,63 @@ button:disabled {
   gap: 6px;
 }
 
+.coloring-panel label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.15);
+  font-size: 12px;
+}
+
+.coloring-label {
+  color: var(--muted);
+}
+
+.coloring-panel select {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
 .layout-panel button {
   font-size: 12px;
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.15);
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.2);
+}
+
+.context-menu button {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 13px;
+  padding: 5px 10px;
+  border-radius: 4px;
+}
+
+.context-menu button:hover,
+.context-menu button:focus-visible {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* ---------- dialogs ---------- */
@@ -586,6 +719,29 @@ button:disabled {
   color: var(--accent);
 }
 
+.segmented.kind-toggle {
+  margin: 0;
+}
+
+.segmented button.request.active {
+  background: var(--request-soft);
+  border-color: var(--request);
+  color: var(--request);
+}
+
+.actions-inline {
+  display: inline-flex;
+  gap: 4px;
+}
+
+button.request {
+  color: var(--request);
+}
+
+button.request:hover {
+  border-color: var(--request);
+}
+
 .route-ends {
   margin-bottom: 10px;
 }
@@ -631,4 +787,95 @@ button:disabled {
 
 .error-text {
   color: var(--danger);
+}
+
+/* ---------- tags ---------- */
+
+/* `--tag` is set per chip from the tag's colour. */
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 7px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--tag) 55%, transparent);
+  background: color-mix(in srgb, var(--tag) 16%, transparent);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.tag-dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tag);
+}
+
+.tag-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+button.tag-toggle {
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  border-color: var(--border);
+  background: none;
+  color: var(--muted);
+}
+
+button.tag-toggle:hover {
+  border-color: var(--tag);
+}
+
+button.tag-toggle.on {
+  border-color: var(--tag);
+  background: color-mix(in srgb, var(--tag) 20%, transparent);
+  color: var(--text);
+}
+
+.mdg-node-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px 10px 0;
+}
+
+.tree-tag {
+  margin-right: 3px;
+}
+
+.tag-editor {
+  list-style: none;
+  margin: 8px 0 12px;
+  padding: 0;
+}
+
+.tag-editor li {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.tag-color {
+  width: 32px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.tag-usage {
+  font-size: 12px;
+  white-space: nowrap;
 }

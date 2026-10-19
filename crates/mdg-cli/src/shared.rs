@@ -76,10 +76,20 @@ pub fn read_description(
     description: Option<String>,
     description_file: Option<String>,
 ) -> Result<Option<String>> {
-    if description.is_some() && description_file.is_some() {
-        return Err(MdgError::argument("Use either --description or --description-file, not both."));
+    read_markdown(ctx, "description", description, description_file)
+}
+
+/// Markdown given inline as `--<flag>` or read from `--<flag>-file` (`-` for stdin).
+pub fn read_markdown(
+    ctx: &mut Context<'_>,
+    flag: &str,
+    text: Option<String>,
+    text_file: Option<String>,
+) -> Result<Option<String>> {
+    if text.is_some() && text_file.is_some() {
+        return Err(MdgError::argument(format!("Use either --{flag} or --{flag}-file, not both.")));
     }
-    let Some(file) = description_file else { return Ok(description) };
+    let Some(file) = text_file else { return Ok(text) };
     if file == "-" {
         return Ok(Some(ctx.io.read_stdin()));
     }

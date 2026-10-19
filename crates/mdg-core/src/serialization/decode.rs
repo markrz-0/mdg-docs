@@ -7,7 +7,7 @@ use super::format::{CONTAINER_MAJOR, HEADER_SIZE, MAGIC, MAGIC_BYTES, MAX_SAFE_I
 use super::index::{parse_index, Index};
 use super::source::{ByteSource, BytesSource};
 use crate::error::{MdgError, Result};
-use crate::model::{Document, Module, Port, SCHEMA_MAJOR};
+use crate::model::{default_tags, Document, Module, Port, SCHEMA_MAJOR};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Header {
@@ -125,6 +125,9 @@ fn check_content_ranges(index: &Index, header: &Header, size: u64) -> Result<()>
         require(&m.description_ref, format!("Module \"{id}\""))?;
         for p in m.inputs.iter().chain(m.outputs.iter()) {
             require(&p.description_ref, format!("Port \"{id}:{}\"", p.id))?;
+            if let Some(response_ref) = &p.response_ref {
+                require(response_ref, format!("Port \"{id}:{}\"", p.id))?;
+            }
         }
     }
     Ok(())
@@ -157,6 +160,11 @@ pub fn read_index(source: &mut dyn ByteSource) -> Result<IndexRead> {
     assert_safe_keys(record.get("modules"), "modules")?;
     assert_safe_keys(record.get("content"), "content")?;
     assert_safe_keys(record.get("metadata"), "metadata")?;
+    if let Some(Value::Array(tags)) = record.get("tags") {
+        for tag in tags {
+            assert_safe_keys(Some(tag), "tags")?;
+        }
+    }
     if let Some(Value::Object(layout)) = record.get("layout") {
         assert_safe_keys(layout.get("positions"), "layout")?;
         assert_safe_keys(layout.get("boundaries"), "layout")?;
@@ -178,10 +186,16 @@ pub fn read_content(source: &mut dyn ByteSource, index: &Index, r: &str) -> Resu
 pub fn index_to_document(index: &Index, mut load_text: impl FnMut(&str, &str) -> Result<String>) -> Result<Document> {
     let mut modules = crate::jsmap::JsMap::new();
     for (key, m) in index.modules.iter() {
-        // Same load order as the original: description, inputs, outputs.
+        // Same load order as the original: description, inputs, outputs
+        // (each port: description, then response).
         let description = load_text(key, &m.description_ref)?;
         let mut port = |p: &super::index::IndexPort| -> Result<Port> {
-            Ok(Port { id: p.id.clone(), name: p.name.clone(), description: load_text(key, &p.description_ref)? })
+            let description = load_text(key, &p.description_ref)?;
+            let response = match &p.response_ref {
+                Some(r) => load_text(key, r)?,
+                None => String::new(),
+            };
+            Ok(Port { id: p.id.clone(), name: p.name.clone(), kind: p.kind, description, response })
         };
         let inputs = m.inputs.iter().map(&mut port).collect::<Result<Vec<_>>>()?;
         let outputs = m.outputs.iter().map(&mut port).collect::<Result<Vec<_>>>()?;
@@ -194,6 +208,7 @@ pub fn index_to_document(index: &Index, mut load_text: impl FnMut(&str, &str) ->
             outputs,
             child_ids: m.child_ids.clone(),
             connections: m.connections.clone(),
+            tags: m.tags.clone(),
         };
         modules.insert(key, Arc::new(module));
     }
@@ -202,6 +217,7 @@ pub fn index_to_document(index: &Index, mut load_text: impl FnMut(&str, &str) ->
         root_id: index.root_id.clone(),
         modules,
         metadata: index.metadata.clone(),
+        tags: index.tags.clone().unwrap_or_else(default_tags),
         layout: index.layout.clone(),
         extensions: if index.extensions.is_empty() { None } else { Some(index.extensions.clone()) },
     })

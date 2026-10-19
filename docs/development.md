@@ -27,7 +27,7 @@ because it embeds the built UI (`editor/dist`). Build it with
 
 | Crate / package | Tests |
 |---|---|
-| mdg-core | `tests/model.rs` (operations, validation, transactions), `tests/serialization.rs` (round trips, UTF-8, integrity, schema messages, partial reads, atomic writes), `tests/routing.rs`, `tests/trace_docs.rs`, `tests/compat.rs` (byte-identical example file) |
+| mdg-core | `tests/model.rs` (operations, validation, transactions), `tests/serialization.rs` (round trips, UTF-8, integrity, schema messages, partial reads, atomic writes), `tests/routing.rs`, `tests/trace_docs.rs`, `tests/request_ports.rs`, `tests/compat.rs` (byte-identical example files) |
 | mdg-cli | `tests/golden.rs` (replays the TypeScript CLI corpus), `tests/cli.rs` (in-process, effects of edits) |
 | mdg-session | `tests/session.rs` (undo, coalescing, dirtiness, layout, routing, files), `tests/fixture.rs` |
 | editor | `tests/graph.test.ts` (graph projection, highlighting, auto-layout) |
@@ -37,6 +37,14 @@ The editor's frontend tests run against
 example. `tests/fixture.rs` fails when that file no longer matches what the
 session sends; regenerate it with
 `UPDATE_FIXTURES=1 cargo test -p mdg-session --test fixture`.
+
+There are two reference examples. `create_authentication_example()` (schema
+1.1, with request/response ports) is `examples/authentication.mdg`;
+regenerate it with `UPDATE_FIXTURES=1 cargo test -p mdg-core --test compat`.
+`create_authentication_example_v1()` (schema 1.0, events only) must encode
+byte-for-byte to `crates/mdg-core/tests/fixtures/authentication-v1.0.mdg`,
+a file written by the TypeScript implementation. Most structural tests and
+the CLI golden corpus use the v1 example.
 
 ## CLI golden tests
 
@@ -51,7 +59,9 @@ node scripts/gen-golden.mjs ../MDG
 Each case sets up a fixture directory, runs one or more invocations, and
 records exit codes, stdout, stderr and written files. Generated UUIDs and
 the per-case directory are normalized. Add a case there when changing CLI
-behaviour that must stay compatible.
+behaviour that must stay compatible. `EXTENDED_HELP` in `golden.rs` lists
+the cases whose help text intentionally goes beyond the TypeScript CLI
+(the request/response port options); only their exit codes are compared.
 
 ## Conventions
 
@@ -60,5 +70,5 @@ behaviour that must stay compatible.
 - Traversals are iterative.
 - `mdg-core` has no UI or Tauri code; the editor UI has no model logic.
 - Every change to the core rules needs a test, and
-  `examples/authentication.mdg` must stay valid with no warnings and
-  byte-identical with `create_authentication_example()`.
+  both reference examples must stay valid with no warnings and
+  byte-identical with their files.

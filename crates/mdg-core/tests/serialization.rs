@@ -11,7 +11,7 @@ fn encode(doc: &Document) -> Vec<u8> {
 }
 
 fn good() -> Vec<u8> {
-    encode(&create_authentication_example())
+    encode(&create_authentication_example_v1())
 }
 
 fn decode_err(bytes: &[u8]) -> MdgError {
@@ -61,7 +61,7 @@ fn round_trips_an_empty_document() {
 
 #[test]
 fn round_trips_a_nested_document_with_layout_metadata_and_extensions() {
-    let mut doc = create_authentication_example();
+    let mut doc = create_authentication_example_v1();
     doc.extensions = Some([("x-tool", json!({ "b": 1, "a": [true, null] }))].into_iter().collect());
     doc.metadata.extra.insert("owner", json!("platform-team"));
     let decoded = decode_mdg(&encode(&doc)).unwrap();
@@ -98,7 +98,7 @@ fn handles_large_descriptions() {
 
 #[test]
 fn serializes_deterministically() {
-    let doc = create_authentication_example();
+    let doc = create_authentication_example_v1();
     let a = encode(&doc);
     assert_eq!(encode(&decode_mdg(&a).unwrap()), a);
     // Module insertion order must not matter.
@@ -330,7 +330,7 @@ fn reads_only_requested_content_blocks() {
 fn writes_and_reads_files() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("a.mdg");
-    let doc = create_authentication_example();
+    let doc = create_authentication_example_v1();
     write_mdg(&file, &doc).unwrap();
     assert_eq!(read_mdg(&file).unwrap(), doc);
     let read = read_mdg_index(&file).unwrap();
@@ -346,7 +346,7 @@ fn writes_and_reads_files() {
 fn writes_atomically_and_never_leaves_partial_output() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("a.mdg");
-    let doc = create_authentication_example();
+    let doc = create_authentication_example_v1();
     write_mdg(&file, &doc).unwrap();
     let before = std::fs::read(&file).unwrap();
     let mut invalid = doc.clone();
@@ -368,7 +368,7 @@ fn writes_atomically_and_never_leaves_partial_output() {
 
 #[test]
 fn round_trips_boundary_panel_positions_deterministically() {
-    let mut doc = create_authentication_example();
+    let mut doc = create_authentication_example_v1();
     let mut boundaries = JsMap::new();
     boundaries.insert(
         "user-routes",
@@ -387,7 +387,7 @@ fn round_trips_boundary_panel_positions_deterministically() {
 
 #[test]
 fn rejects_malformed_boundary_entries() {
-    let mut doc = create_authentication_example();
+    let mut doc = create_authentication_example_v1();
     let mut boundaries = JsMap::new();
     boundaries.insert("api-service", BoundaryLayout { input: Some(Position::new(1.0, 2.0)), output: None });
     doc.layout = Some(Layout { positions: JsMap::new(), boundaries: Some(boundaries) });

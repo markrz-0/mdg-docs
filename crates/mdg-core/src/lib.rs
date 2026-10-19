@@ -17,7 +17,7 @@ pub mod validate;
 
 pub use documentation::*;
 pub use error::{ErrorCode, MdgError, Result};
-pub use example::create_authentication_example;
+pub use example::{create_authentication_example, create_authentication_example_v1};
 pub use ids::*;
 pub use jsmap::JsMap;
 pub use model::*;

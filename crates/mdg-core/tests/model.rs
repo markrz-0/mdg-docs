@@ -54,7 +54,7 @@ fn rejects_ports_on_the_root() {
 fn reports_root_constraint_violations() {
     let doc = Builder::new().doc;
     let bad = edit_module(&doc, "root", |m| {
-        m.inputs.push(Port { id: "i".into(), name: "i".into(), description: String::new() })
+        m.inputs.push(Port { id: "i".into(), name: "i".into(), description: String::new(), ..Default::default() })
     });
     assert!(error_codes(&bad).contains(&"ROOT_HAS_PORTS"));
     let mut missing = doc.clone();
@@ -164,7 +164,7 @@ fn creates_renames_describes_and_deletes_ports() {
     let doc = update_port_description(&doc, "a", "out", "Emits a JWT.").unwrap();
     assert_eq!(
         module(&doc, "a").inputs[0],
-        Port { id: "in".into(), name: "Login Request".into(), description: String::new() }
+        Port { id: "in".into(), name: "Login Request".into(), description: String::new(), ..Default::default() }
     );
     assert_eq!(module(&doc, "a").outputs[0].description, "Emits a JWT.");
     let doc = remove_port(&doc, "a", "in", false).unwrap();
@@ -307,6 +307,7 @@ fn detects_inconsistent_parent_child_links_and_missing_references() {
             outputs: vec![],
             child_ids: vec![],
             connections: vec![],
+            tags: vec![],
         }),
     );
     let found = error_codes(&doc);

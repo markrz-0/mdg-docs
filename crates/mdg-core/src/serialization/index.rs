@@ -11,17 +11,21 @@
 use serde_json::{Map, Value};
 
 use crate::jsmap::{js_key_order, JsMap};
-use crate::model::{BoundaryLayout, Connection, Endpoint, Layout, Metadata, Position};
+use crate::model::{BoundaryLayout, Connection, Endpoint, Layout, Metadata, PortKind, Position, Tag};
 use crate::serialization::format::MAX_SAFE_INTEGER;
 
 /// Top-level index keys defined by schema 1.x. Others are preserved as extensions.
-pub const KNOWN_INDEX_KEYS: [&str; 6] = ["schemaVersion", "rootId", "metadata", "modules", "content", "layout"];
+pub const KNOWN_INDEX_KEYS: [&str; 7] = ["schemaVersion", "rootId", "metadata", "modules", "content", "layout", "tags"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndexPort {
     pub id: String,
     pub name: String,
+    /// Schema 1.1: `"request"`; absent for events.
+    pub kind: PortKind,
     pub description_ref: String,
+    /// Schema 1.1, request ports only: the response contract's block.
+    pub response_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,6 +38,8 @@ pub struct IndexModule {
     pub outputs: Vec<IndexPort>,
     pub child_ids: Vec<String>,
     pub connections: Vec<Connection>,
+    /// Schema 1.2: IDs of the tags attached to the module; empty when absent.
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +56,9 @@ pub struct Index {
     pub modules: JsMap<IndexModule>,
     pub content: JsMap<ContentEntry>,
     pub layout: Option<Layout>,
+    /// Schema 1.2: the document's tag list. `None` when absent (older
+    /// documents), which means the default tags.
+    pub tags: Option<Vec<Tag>>,
     /// Unknown top-level keys, preserved verbatim.
     pub extensions: JsMap<Value>,
 }
@@ -234,13 +243,46 @@ impl Checker {
         ok.then_some(out)
     }
 
+    fn port_kind(&mut self, value: Option<&Value>, path: Path<'_>) -> Option<PortKind> {
+        match value {
+            None => Some(PortKind::Event),
+            Some(_) => match self.string(value, path)?.as_str() {
+                "event" => Some(PortKind::Event),
+                "request" => Some(PortKind::Request),
+                other => {
+                    self.issue(path, format!("Invalid enum value. Expected 'event' | 'request', received '{other}'"));
+                    None
+                }
+            },
+        }
+    }
+
     fn port(&mut self, value: &Value, path: Path<'_>) -> Option<IndexPort> {
         let map = self.object(Some(value), path)?;
         let id = self.string(map.get("id"), &child(path, "id"));
         let name = self.string(map.get("name"), &child(path, "name"));
+        let kind = self.port_kind(map.get("kind"), &child(path, "kind"));
         let description_ref = self.non_empty_string(map.get("descriptionRef"), &child(path, "descriptionRef"));
-        let strict = self.strict(map, &["id", "name", "descriptionRef"], path);
-        keep(strict, IndexPort { id: id?, name: name?, description_ref: description_ref? })
+        let response_path = child(path, "responseRef");
+        let response_ref = match (kind, map.get("responseRef")) {
+            (Some(PortKind::Request), value) => self.non_empty_string(value, &response_path).map(Some),
+            (Some(PortKind::Event), Some(_)) => {
+                self.issue(&response_path, "Only request ports have a response");
+                None
+            }
+            (_, _) => Some(None),
+        };
+        let strict = self.strict(map, &["id", "name", "kind", "descriptionRef", "responseRef"], path);
+        keep(
+            strict,
+            IndexPort {
+                id: id?,
+                name: name?,
+                kind: kind?,
+                description_ref: description_ref?,
+                response_ref: response_ref?,
+            },
+        )
     }
 
     fn endpoint(&mut self, value: Option<&Value>, path: Path<'_>) -> Option<Endpoint> {
@@ -270,9 +312,13 @@ impl Checker {
         let outputs = self.list(map.get("outputs"), &child(path, "outputs"), Self::port);
         let child_ids = self.list(map.get("childIds"), &child(path, "childIds"), |c, v, p| c.string(Some(v), p));
         let connections = self.list(map.get("connections"), &child(path, "connections"), Self::connection);
+        let tags = match map.get("tags") {
+            None => Some(vec![]),
+            Some(v) => self.list(Some(v), &child(path, "tags"), |c, v, p| c.string(Some(v), p)),
+        };
         let strict = self.strict(
             map,
-            &["id", "parentId", "name", "descriptionRef", "inputs", "outputs", "childIds", "connections"],
+            &["id", "parentId", "name", "descriptionRef", "inputs", "outputs", "childIds", "connections", "tags"],
             path,
         );
         keep(
@@ -286,8 +332,25 @@ impl Checker {
                 outputs: outputs?,
                 child_ids: child_ids?,
                 connections: connections?,
+                tags: tags?,
             },
         )
+    }
+
+    fn tag(&mut self, value: &Value, path: Path<'_>) -> Option<Tag> {
+        let map = self.object(Some(value), path)?;
+        let id = self.string(map.get("id"), &child(path, "id"));
+        let name = self.string(map.get("name"), &child(path, "name"));
+        let color = self.string(map.get("color"), &child(path, "color"));
+        let strict = self.strict(map, &["id", "name", "color"], path);
+        keep(strict, Tag { id: id?, name: name?, color: color? })
+    }
+
+    fn tags(&mut self, value: Option<&Value>, path: Path<'_>) -> Option<Option<Vec<Tag>>> {
+        match value {
+            None => Some(None),
+            Some(_) => self.list(value, path, Self::tag).map(Some),
+        }
     }
 
     fn content(&mut self, value: &Value, path: Path<'_>) -> Option<ContentEntry> {
@@ -364,6 +427,7 @@ pub fn parse_index(raw: &Map<String, Value>) -> std::result::Result<Index, Strin
     let modules = c.record(raw.get("modules"), &field("modules"), Checker::module);
     let content = c.record(raw.get("content"), &field("content"), Checker::content);
     let layout = c.layout(raw.get("layout"), &field("layout"));
+    let tags = c.tags(raw.get("tags"), &field("tags"));
     if !c.issues.is_empty() {
         return Err(c.issues.iter().take(5).cloned().collect::<Vec<_>>().join("; "));
     }
@@ -379,6 +443,7 @@ pub fn parse_index(raw: &Map<String, Value>) -> std::result::Result<Index, Strin
         modules: modules.expect("checked"),
         content: content.expect("checked"),
         layout: layout.expect("checked"),
+        tags: tags.expect("checked"),
         extensions,
     })
 }

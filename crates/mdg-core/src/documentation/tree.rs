@@ -18,6 +18,9 @@ pub struct TreeOptions {
 pub struct TreeNode {
     pub id: String,
     pub name: String,
+    /// IDs of the module's tags. Omitted when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
     pub children: Vec<TreeNode>,
     /// Present (true) when children exist but were cut off by `depth`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -51,7 +54,11 @@ pub fn render_tree(doc: &Document, options: &TreeOptions) -> Result<String> {
     let max_depth = options.depth.unwrap_or(usize::MAX);
     let label = |id: &str| -> Result<String> {
         let m = get_module(doc, id)?;
-        Ok(if options.ids { format!("{} [{}]", m.name, m.id) } else { m.name.clone() })
+        let mut label = if options.ids { format!("{} [{}]", m.name, m.id) } else { m.name.clone() };
+        for tag in &m.tags {
+            label.push_str(&format!(" #{tag}"));
+        }
+        Ok(label)
     };
     let mut lines = vec![label(start_id)?];
 
@@ -86,11 +93,13 @@ pub fn build_tree(doc: &Document, options: &TreeOptions) -> Result<TreeNode> {
     struct Slot {
         id: String,
         name: String,
+        tags: Vec<String>,
         children: Vec<usize>,
         truncated: bool,
     }
     let make = |id: &str| -> Result<Slot> {
-        Ok(Slot { id: id.to_string(), name: get_module(doc, id)?.name.clone(), children: vec![], truncated: false })
+        let m = get_module(doc, id)?;
+        Ok(Slot { id: id.to_string(), name: m.name.clone(), tags: m.tags.clone(), children: vec![], truncated: false })
     };
     let mut arena = vec![make(start_id)?];
     let mut stack: Vec<(usize, usize)> = vec![(0, 0)];
@@ -118,6 +127,7 @@ pub fn build_tree(doc: &Document, options: &TreeOptions) -> Result<TreeNode> {
         built[index] = Some(TreeNode {
             id: slot.id.clone(),
             name: slot.name.clone(),
+            tags: slot.tags.clone(),
             children,
             truncated: slot.truncated.then_some(true),
         });

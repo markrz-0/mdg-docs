@@ -1,7 +1,8 @@
+import type { Edge } from '@xyflow/react';
 import { describe, expect, it } from 'vitest';
 import type { Selection, View } from '../src/api';
 import { layoutAll, layoutChildren } from '../src/graph/autoLayout';
-import { BOUNDARY_IN, BOUNDARY_OUT, buildGraph } from '../src/graph/buildGraph';
+import { BOUNDARY_IN, BOUNDARY_OUT, buildGraph, mixColors } from '../src/graph/buildGraph';
 import { boundaryKey } from '../src/state/layoutKeys';
 import fixture from './fixtures/authentication.view.json';
 
@@ -12,17 +13,66 @@ const doc = view.document;
 describe('buildGraph', () => {
   it('shows only direct children at the root, without boundary nodes', () => {
     const { nodes, edges } = buildGraph(doc, 'application', view.positions, null);
-    expect(nodes.map((n) => n.id)).toEqual(['frontend', 'api-service', 'jwt-validator']);
-    expect(edges).toHaveLength(6);
+    expect(nodes.map((n) => n.id)).toEqual(['frontend', 'api-service', 'jwt-validator', 'audit-log']);
+    expect(edges).toHaveLength(4);
   });
 
   it('renders the current module as boundary nodes, not as a child', () => {
     const { nodes, edges } = buildGraph(doc, 'user-routes', view.positions, null);
     expect(nodes.map((n) => n.id)).toEqual([BOUNDARY_IN, 'protected-endpoint', BOUNDARY_OUT]);
-    const request = edges.find((e) => e.id === 'routes-request')!;
-    expect(request).toMatchObject({ source: BOUNDARY_IN, sourceHandle: 'profile-request', target: 'protected-endpoint' });
+    const request = edges.find((e) => e.id === 'routes-profile')!;
+    expect(request).toMatchObject({ source: BOUNDARY_IN, sourceHandle: 'get-profile', target: 'protected-endpoint' });
     const out = edges.find((e) => e.id === 'routes-validate-token')!;
-    expect(out).toMatchObject({ source: 'protected-endpoint', target: BOUNDARY_OUT, targetHandle: 'token-validation-request' });
+    expect(out).toMatchObject({ source: 'protected-endpoint', target: BOUNDARY_OUT, targetHandle: 'validate-token' });
+  });
+
+  it('shows the tags a module carries, in its own order', () => {
+    expect(doc.tags.map((t) => t.id)).toEqual(['done', 'partially-done', 'not-done', 'to-implement']);
+    const tagged = {
+      ...doc,
+      modules: { ...doc.modules, frontend: { ...doc.modules.frontend!, tags: ['partially-done', 'done'] } },
+    };
+    const { nodes } = buildGraph(tagged, 'application', view.positions, null);
+    const tagsOf = (id: string) => {
+      const node = nodes.find((n) => n.id === id)!;
+      return node.type === 'module' ? node.data.tags.map((t) => [t.id, t.color]) : null;
+    };
+    expect(tagsOf('frontend')).toEqual([
+      ['partially-done', '#d4a017'],
+      ['done', '#2a8a4a'],
+    ]);
+    expect(tagsOf('api-service')).toEqual([]);
+    const colorOf = (id: string) => {
+      const node = nodes.find((n) => n.id === id)!;
+      return node.type === 'module' ? node.data.color : undefined;
+    };
+    expect(colorOf('frontend')).toBe(mixColors(['#d4a017', '#2a8a4a']));
+    expect(colorOf('api-service')).toBeNull();
+  });
+
+  it('colours a node by its tag, mixing several tags', () => {
+    expect(mixColors([])).toBeNull();
+    expect(mixColors(['#c43b3b'])).toBe('#c43b3b');
+    expect(mixColors(['#ff0000', '#0000ff'])).toBe('#800080');
+    expect(mixColors(['#000000', '#ffffff', '#ffffff'])).toBe('#aaaaaa');
+  });
+
+  it('tells request/response ports and connections apart from events', () => {
+    const { nodes, edges } = buildGraph(doc, 'application', view.positions, null);
+    const api = nodes.find((n) => n.id === 'api-service')!;
+    expect(api.type === 'module' && api.data.outputs.map((p) => [p.id, p.kind])).toEqual([
+      ['validate-token', 'request'],
+      ['security-event', 'event'],
+    ]);
+    const kinds = Object.fromEntries(edges.map((e) => [e.id, e.data?.kind]));
+    expect(kinds).toEqual({
+      'root-login': 'request',
+      'root-profile': 'request',
+      'root-validate-token': 'request',
+      'root-security-event': 'event',
+    });
+    expect(edges.find((e) => e.id === 'root-login')!.className).toBe('request');
+    expect(edges.find((e) => e.id === 'root-security-event')!.className).toBeUndefined();
   });
 
   it('uses stored positions, including moved boundary panels', () => {
@@ -44,18 +94,39 @@ describe('buildGraph', () => {
 });
 
 describe('port highlighting', () => {
-  it('highlights every connection from or to the selected port', () => {
-    const port: Selection = { kind: 'port', moduleId: 'api-service', portId: 'login-response' };
+  const highlighted = (edges: Edge[]) => edges.filter((e) => e.className?.includes('highlighted'));
+
+  it('highlights every connection from or to the selected event port in blue', () => {
+    const port: Selection = { kind: 'port', moduleId: 'api-service', portId: 'security-event' };
     const root = buildGraph(doc, 'application', view.positions, port);
-    expect(root.edges.filter((e) => e.className === 'highlighted').map((e) => e.id)).toEqual(['root-login-response']);
-    // Inside API Service the same port is a boundary output fed by two sources.
+    expect(highlighted(root.edges).map((e) => [e.id, e.className])).toEqual([['root-security-event', 'highlighted']]);
+    expect(highlighted(root.edges)[0]!.markerEnd).toMatchObject({ color: 'var(--accent)' });
+    // Inside API Service the same port is a boundary output.
     const inside = buildGraph(doc, 'api-service', view.positions, port);
-    expect(inside.edges.filter((e) => e.className === 'highlighted').map((e) => e.id)).toEqual([
-      'api-token-issued',
-      'api-login-failed',
-    ]);
+    expect(highlighted(inside.edges).map((e) => e.id)).toEqual(['api-login-failed']);
     const none = buildGraph(doc, 'application', view.positions, null);
-    expect(none.edges.some((e) => e.className === 'highlighted')).toBe(false);
+    expect(highlighted(none.edges)).toEqual([]);
+  });
+
+  it('highlights request/response connections in green', () => {
+    const port: Selection = { kind: 'port', moduleId: 'api-service', portId: 'validate-token' };
+    const root = buildGraph(doc, 'application', view.positions, port);
+    expect(highlighted(root.edges).map((e) => [e.id, e.className])).toEqual([
+      ['root-validate-token', 'request highlighted'],
+    ]);
+    expect(highlighted(root.edges)[0]!.markerEnd).toMatchObject({ color: 'var(--request)' });
+    const inside = buildGraph(doc, 'api-service', view.positions, port);
+    expect(highlighted(inside.edges).map((e) => e.id)).toEqual(['api-validate-token']);
+  });
+
+  it('highlights every connection on any port of the selected module', () => {
+    const module: Selection = { kind: 'module', moduleId: 'api-service' };
+    const root = buildGraph(doc, 'application', view.positions, module);
+    const touching = doc.modules['application']!.connections
+      .filter((c) => c.from.moduleId === 'api-service' || c.to.moduleId === 'api-service')
+      .map((c) => c.id);
+    expect(touching).toEqual(expect.arrayContaining(['root-security-event', 'root-validate-token']));
+    expect(highlighted(root.edges).map((e) => e.id)).toEqual(touching);
   });
 });
 
@@ -77,9 +148,14 @@ describe('auto-layout', () => {
 
   it('places no boundary panels at the root and separates nodes', () => {
     const positions = layoutChildren(doc, 'application');
-    expect(Object.keys(positions).sort()).toEqual(['api-service', 'frontend', 'jwt-validator']);
-    const xs = Object.values(positions).map((p) => p.x).sort((a, b) => a - b);
-    for (let i = 1; i < xs.length; i += 1) expect(xs[i]! - xs[i - 1]!).toBeGreaterThanOrEqual(200);
+    expect(Object.keys(positions).sort()).toEqual(['api-service', 'audit-log', 'frontend', 'jwt-validator']);
+    // Nodes in different columns are 200px apart; nodes sharing a column are stacked.
+    const ps = Object.values(positions);
+    for (const [i, a] of ps.entries()) {
+      for (const b of ps.slice(i + 1)) {
+        expect(Math.abs(a.x - b.x) >= 200 || Math.abs(a.y - b.y) >= 40).toBe(true);
+      }
+    }
   });
 
   it('lays out every level, including the boundary panels of each parent', () => {

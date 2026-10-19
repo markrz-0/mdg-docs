@@ -1,0 +1,214 @@
+//! Request/response ports: model rules, operations, routing, serialization
+//! and documentation.
+
+mod common;
+
+use common::*;
+use mdg_core::*;
+use serde_json::Value;
+
+/// client -> server over one request connection, plus an event pair.
+fn client_server() -> Document {
+    Builder::new()
+        .module("client")
+        .module("server")
+        .calls("client", "fetch")
+        .handles("server", "fetch")
+        .output("client", "ping")
+        .input("server", "ping")
+        .connect("c-fetch", "client:fetch", "server:fetch")
+        .connect("c-ping", "client:ping", "server:ping")
+        .doc
+}
+
+fn index_json(bytes: &[u8]) -> Value {
+    let offset = u64::from_le_bytes(bytes[8..16].try_into().unwrap()) as usize;
+    let length = u64::from_le_bytes(bytes[16..24].try_into().unwrap()) as usize;
+    serde_json::from_slice(&bytes[offset..offset + length]).unwrap()
+}
+
+// ------------------------------------------------------------ model and ops
+
+#[test]
+fn a_request_port_raises_the_schema_version() {
+    let events = Builder::new().module("a").input("a", "in").doc;
+    assert_eq!(events.format_version, SCHEMA_VERSION);
+    let doc = Builder::new().module("a").handles("a", "in").doc;
+    assert_eq!(doc.format_version, REQUEST_PORTS_SCHEMA_VERSION);
+    let port = &module(&doc, "a").inputs[0];
+    assert_eq!(
+        (port.kind, port.description.as_str(), port.response.as_str()),
+        (PortKind::Request, "in request", "in response")
+    );
+}
+
+#[test]
+fn an_event_port_cannot_have_a_response() {
+    let doc = Builder::new().module("a").doc;
+    let options = AddPortOptions { name: "x".into(), response: Some("nope".into()), ..Default::default() };
+    assert_eq!(add_port(&doc, "a", PortDirection::Input, options).unwrap_err().code, ErrorCode::InvalidArgument);
+
+    let doc = Builder::new().module("a").input("a", "in").doc;
+    assert!(update_port_response(&doc, "a", "in", "nope").is_err());
+
+    let broken = edit_module(&doc, "a", |m| m.inputs[0].response = "nope".into());
+    assert_eq!(error_codes(&broken), ["RESPONSE_ON_EVENT_PORT"]);
+}
+
+#[test]
+fn connections_join_ports_of_the_same_kind_only() {
+    let doc = Builder::new().module("client").module("server").calls("client", "fetch").input("server", "ping").doc;
+    let err = add_connection(
+        &doc,
+        AddConnectionOptions { from: ep("client:fetch"), to: ep("server:ping"), ..Default::default() },
+    )
+    .unwrap_err();
+    assert!(err.message.contains("Both ends must be the same kind"), "{}", err.message);
+
+    // A hand-built mismatch is reported by validation.
+    let doc = client_server();
+    let broken = edit_module(&doc, "root", |m| m.connections[0].to = ep("server:ping"));
+    let errors = validate_document(&broken, ValidationOptions::default()).errors;
+    assert_eq!(codes(&errors), ["PORT_KIND_MISMATCH"]);
+    assert_eq!(errors[0].connection_id.as_deref(), Some("c-fetch"));
+}
+
+#[test]
+fn a_caller_may_connect_to_several_handlers() {
+    let doc = Builder::new()
+        .module("client")
+        .module("primary")
+        .module("fallback")
+        .calls("client", "fetch")
+        .handles("primary", "fetch")
+        .handles("fallback", "fetch")
+        .connect("c1", "client:fetch", "primary:fetch")
+        .connect("c2", "client:fetch", "fallback:fetch")
+        .doc;
+    assert!(validate_document(&doc, ValidationOptions::default()).valid);
+}
+
+#[test]
+fn set_port_kind_refuses_connected_ports_and_drops_the_response() {
+    let doc = client_server();
+    let err = set_port_kind(&doc, "client", "fetch", PortKind::Event).unwrap_err();
+    assert!(err.message.contains("c-fetch"), "{}", err.message);
+
+    let doc = remove_connection(&doc, "c-fetch").unwrap();
+    let doc = set_port_kind(&doc, "client", "fetch", PortKind::Event).unwrap();
+    let port = &module(&doc, "client").outputs[0];
+    assert_eq!((port.kind, port.response.as_str()), (PortKind::Event, ""));
+
+    let doc = set_port_kind(&doc, "client", "fetch", PortKind::Request).unwrap();
+    let doc = update_port_response(&doc, "client", "fetch", "The page.").unwrap();
+    assert_eq!(module(&doc, "client").outputs[0].response, "The page.");
+}
+
+// ------------------------------------------------------------ routing
+
+#[test]
+fn routing_a_request_creates_request_boundary_ports() {
+    let doc = Builder::new()
+        .module("app")
+        .module_in("client", "app")
+        .module("db")
+        .calls("client", "query")
+        .handles("db", "query")
+        .doc;
+    let result = route_connection(&doc, &ep("client:query"), &ep("db:query"), RouteOptions::default()).unwrap();
+    let created: Vec<&Port> = result
+        .plan
+        .steps
+        .iter()
+        .filter_map(|s| match s {
+            RouteStep::CreatePort { port, .. } => Some(port),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(created.len(), 1);
+    assert_eq!(created[0].kind, PortKind::Request);
+    assert!(created[0].response.contains("Generated by boundary routing"));
+    assert!(validate_document(&result.document, ValidationOptions::default()).valid);
+}
+
+#[test]
+fn routing_refuses_mixed_kinds() {
+    let doc = Builder::new()
+        .module("app")
+        .module_in("client", "app")
+        .module("db")
+        .calls("client", "query")
+        .input("db", "event")
+        .doc;
+    let err = route_connection(&doc, &ep("client:query"), &ep("db:event"), RouteOptions::default()).unwrap_err();
+    assert!(err.message.contains("same kind"), "{}", err.message);
+}
+
+// ------------------------------------------------------------ serialization
+
+#[test]
+fn request_ports_are_written_with_kind_and_response_blocks() {
+    let doc = client_server();
+    let bytes = encode_mdg(&doc, EncodeOptions::default()).unwrap();
+    let index = index_json(&bytes);
+    assert_eq!(index["schemaVersion"], "1.1.0");
+    let fetch = &index["modules"]["client"]["outputs"][0];
+    assert_eq!(fetch["kind"], "request");
+    assert_eq!(fetch["responseRef"], "port/client/fetch/response");
+    let keys: Vec<&String> = fetch.as_object().unwrap().keys().collect();
+    assert_eq!(keys, ["id", "name", "kind", "descriptionRef", "responseRef"]);
+    // Event ports are written exactly as in schema 1.0.
+    let ping = index["modules"]["client"]["outputs"][1].as_object().unwrap();
+    assert_eq!(ping.keys().collect::<Vec<_>>(), ["id", "name", "descriptionRef"]);
+
+    let decoded = decode_mdg(&bytes).unwrap();
+    assert_eq!(decoded, doc);
+    assert_eq!(encode_mdg(&decoded, EncodeOptions::default()).unwrap(), bytes);
+}
+
+#[test]
+fn a_request_port_in_a_1_0_document_is_written_as_1_1() {
+    let mut doc = client_server();
+    doc.format_version = "1.0.0".into();
+    let bytes = encode_mdg(&doc, EncodeOptions::default()).unwrap();
+    assert_eq!(index_json(&bytes)["schemaVersion"], "1.1.0");
+}
+
+#[test]
+fn malformed_request_port_records_are_rejected() {
+    let bytes = encode_mdg(&client_server(), EncodeOptions::default()).unwrap();
+    let patch = |from: &str, to: &str| {
+        // Same-length replacements keep every offset valid.
+        assert_eq!(from.len(), to.len());
+        let at = bytes.windows(from.len()).position(|w| w == from.as_bytes()).expect("pattern in index");
+        let mut copy = bytes.clone();
+        copy[at..at + to.len()].copy_from_slice(to.as_bytes());
+        decode_mdg(&copy).unwrap_err().message
+    };
+    let message = patch(r#""kind":"request""#, r#""kind":"reqvest""#);
+    assert!(message.contains("Expected 'event' | 'request', received 'reqvest'"), "{message}");
+    let message = patch(r#""kind":"request""#, r#""kind":"event"  "#);
+    assert!(message.contains("Only request ports have a response"), "{message}");
+    let message = patch(r#""responseRef""#, r#""responseRaf""#);
+    assert!(message.contains("responseRef: Required"), "{message}");
+}
+
+// ------------------------------------------------------------ documentation
+
+#[test]
+fn describe_shows_request_and_response_contracts() {
+    let doc = client_server();
+    let markdown = describe_module_markdown(&doc, "server", Some(0)).unwrap();
+    assert!(markdown.contains(
+        "### fetch\n- ID: `fetch`\n- Kind: request/response, handled here\n\n#### Request\n\nfetch request\n\n#### Response\n\nfetch response\n"
+    ), "{markdown}");
+    // Event ports render as before.
+    assert!(markdown.contains("### ping\n- ID: `ping`\n\n_No description._\n"), "{markdown}");
+    let client = describe_module_markdown(&doc, "client", Some(0)).unwrap();
+    assert!(client.contains("- Kind: request/response, sent from here"), "{client}");
+
+    let json = js::to_value(&describe_module(&doc, "server", Some(0)).unwrap());
+    assert_eq!(json["module"]["inputs"][0]["kind"], "request");
+    assert_eq!(json["module"]["inputs"][0]["response"], "fetch response");
+    assert!(json["module"]["inputs"][1].get("kind").is_none());
+}

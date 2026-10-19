@@ -22,12 +22,20 @@ pub enum Action {
     ModuleRename,
     ModuleMove,
     ModuleSetDescription,
+    ModuleTag,
+    ModuleUntag,
     PortAdd,
     PortRemove,
     PortRename,
     PortSetDescription,
+    PortSetResponse,
+    PortSetKind,
     Connect,
     Disconnect,
+    TagList,
+    TagAdd,
+    TagUpdate,
+    TagRemove,
 }
 
 type Cmd = Command<Action>;
@@ -46,6 +54,12 @@ fn with_description_options(command: Cmd) -> Cmd {
     command
         .option(Opt::new("--description <markdown>", "Markdown description"))
         .option(Opt::new("--description-file <path>", "read the Markdown description from a file (`-` for stdin)"))
+}
+
+fn with_response_options(command: Cmd) -> Cmd {
+    command
+        .option(Opt::new("--response <markdown>", "Markdown response contract (request ports)"))
+        .option(Opt::new("--response-file <path>", "read the Markdown response contract from a file (`-` for stdin)"))
 }
 
 fn inspect_commands(program: Cmd) -> Cmd {
@@ -230,22 +244,100 @@ fn module_commands() -> Cmd {
             ]))
             .action(Action::ModuleSetDescription),
         )
+        .command(
+            with_edit_options(
+                Cmd::new("tag", "Attach document tags to a module (see `mdg tag list`). Tags it already carries are kept.")
+                    .argument("<file>", ".mdg file")
+                    .argument("<module-id>", "module ID")
+                    .argument("<tag-id...>", "one or more tag IDs"),
+            )
+            .help_after(examples(&[
+                "mdg module tag architecture.mdg auth-001 done",
+                "mdg module tag architecture.mdg billing partially-done --json",
+            ]))
+            .action(Action::ModuleTag),
+        )
+        .command(
+            with_edit_options(
+                Cmd::new("untag", "Remove tags from a module. Tags it does not carry are ignored.")
+                    .argument("<file>", ".mdg file")
+                    .argument("<module-id>", "module ID")
+                    .argument("<tag-id...>", "one or more tag IDs"),
+            )
+            .help_after(examples(&["mdg module untag architecture.mdg auth-001 partially-done"]))
+            .action(Action::ModuleUntag),
+        )
+}
+
+fn tag_commands() -> Cmd {
+    Cmd::new(
+        "tag",
+        "List, add, change or remove the document's tags. Every document starts with: done, partially \
+         done, not done, to implement.",
+    )
+    .command(
+        Cmd::new("list", "List the document's tags with their colours and how many modules carry each.")
+            .argument("<file>", ".mdg file")
+            .option(json("machine-readable output"))
+            .help_after(examples(&["mdg tag list architecture.mdg", "mdg tag list architecture.mdg --json"]))
+            .action(Action::TagList),
+    )
+    .command(
+        with_edit_options(
+            Cmd::new("add", "Add a tag to the document's tag list.")
+                .argument("<file>", ".mdg file")
+                .option(Opt::new("--name <name>", "tag name").mandatory())
+                .option(Opt::new("--color <#rrggbb>", "tag colour").mandatory())
+                .option(Opt::new("--id <id>", "explicit tag ID (generated when omitted)")),
+        )
+        .help_after(examples(&[
+            "mdg tag add architecture.mdg --name \"needs review\" --color \"#8e44ad\" --id needs-review",
+        ]))
+        .action(Action::TagAdd),
+    )
+    .command(
+        with_edit_options(
+            Cmd::new("update", "Rename a tag or change its colour. Its ID never changes.")
+                .argument("<file>", ".mdg file")
+                .argument("<tag-id>", "tag ID")
+                .option(Opt::new("--name <name>", "new name"))
+                .option(Opt::new("--color <#rrggbb>", "new colour")),
+        )
+        .help_after(examples(&["mdg tag update architecture.mdg to-implement --color \"#5b8def\""]))
+        .action(Action::TagUpdate),
+    )
+    .command(
+        with_edit_options(
+            Cmd::new("remove", "Remove a tag from the document and from every module that carries it.")
+                .argument("<file>", ".mdg file")
+                .argument("<tag-id>", "tag ID"),
+        )
+        .help_after(examples(&["mdg tag remove architecture.mdg needs-review --dry-run"]))
+        .action(Action::TagRemove),
+    )
 }
 
 fn port_commands() -> Cmd {
     Cmd::new("port", "Add, remove, rename or describe ports.")
         .command(
-            with_edit_options(with_description_options(
-                Cmd::new("add", "Add an input or output port to a module (not the root).")
-                    .argument("<file>", ".mdg file")
-                    .argument("<module-id>", "module ID")
-                    .option(Opt::new("--direction <direction>", "port direction").choices(&["input", "output"]).mandatory())
-                    .option(Opt::new("--name <name>", "port name").mandatory())
-                    .option(Opt::new("--id <id>", "explicit port ID, unique within the module (generated when omitted)")),
-            ))
+            with_edit_options(with_response_options(with_description_options(
+                Cmd::new(
+                    "add",
+                    "Add an input or output port to a module (not the root). An event port carries one-way messages; \
+                     a request port carries a request and its response (as an output it sends requests, as an input \
+                     it handles them).",
+                )
+                .argument("<file>", ".mdg file")
+                .argument("<module-id>", "module ID")
+                .option(Opt::new("--direction <direction>", "port direction").choices(&["input", "output"]).mandatory())
+                .option(Opt::new("--name <name>", "port name").mandatory())
+                .option(Opt::new("--kind <kind>", "event (default) or request/response").choices(&["event", "request"]))
+                .option(Opt::new("--id <id>", "explicit port ID, unique within the module (generated when omitted)")),
+            )))
             .help_after(examples(&[
                 "mdg port add architecture.mdg auth-001 --direction input --name \"Login Request\" --id login-request --description \"Receives POST /login.\"",
                 "mdg port add architecture.mdg auth-001 --direction output --name \"Token Issued\" --json",
+                "mdg port add architecture.mdg auth-001 --direction input --kind request --name \"Login\" --description \"POST /login with credentials.\" --response \"A JWT, or 401 with a reason.\"",
             ]))
             .action(Action::PortAdd),
         )
@@ -283,6 +375,33 @@ fn port_commands() -> Cmd {
             ]))
             .action(Action::PortSetDescription),
         )
+        .command(
+            with_edit_options(with_response_options(
+                Cmd::new("set-response", "Replace a request port's Markdown response contract.")
+                    .argument("<file>", ".mdg file")
+                    .argument("<module-id>", "module ID")
+                    .argument("<port-id>", "port ID"),
+            ))
+            .help_after(examples(&[
+                "mdg port set-response architecture.mdg auth-001 login --response \"A signed JWT, or 401 with a reason.\"",
+            ]))
+            .action(Action::PortSetResponse),
+        )
+        .command(
+            with_edit_options(
+                Cmd::new(
+                    "set-kind",
+                    "Make a port an event port or a request/response port. The port must not be connected. \
+                     Switching to event drops the response contract.",
+                )
+                .argument("<file>", ".mdg file")
+                .argument("<module-id>", "module ID")
+                .argument("<port-id>", "port ID")
+                .argument("<kind>", "event or request"),
+            )
+            .help_after(examples(&["mdg port set-kind architecture.mdg auth-001 login request"]))
+            .action(Action::PortSetKind),
+        )
 }
 
 fn edit_commands(program: Cmd) -> Cmd {
@@ -302,6 +421,7 @@ fn edit_commands(program: Cmd) -> Cmd {
         )
         .command(module_commands())
         .command(port_commands())
+        .command(tag_commands())
         .command(
             with_edit_options(
                 Cmd::new(

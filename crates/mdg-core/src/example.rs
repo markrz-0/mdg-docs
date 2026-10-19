@@ -10,14 +10,25 @@
 //!     User Routes
 //!       Protected Endpoint
 //!   JWT Validator
+//!   Audit Log              (schema 1.1 example only)
 //! ```
 //!
-//! A token validation request originates inside Protected Endpoint, leaves
-//! through the User Routes and API Service output boundaries, reaches JWT
-//! Validator at root level, and the result returns through the matching
-//! input boundaries. IDs are fixed so the generated file is reproducible.
+//! Two versions exist. [`create_authentication_example`] (schema 1.1, the
+//! file in `examples/`) models each exchange that expects an answer as one
+//! request/response port pair: a token validation request originates inside
+//! Protected Endpoint, leaves through the User Routes and API Service
+//! boundaries and is handled by JWT Validator at root level; the verdict
+//! returns over the same connections. Fire-and-forget security events flow
+//! to the Audit Log as plain events.
+//!
+//! [`create_authentication_example_v1`] (schema 1.0) is the original, which
+//! models every exchange as separate request and result events. Files
+//! written from it are byte-identical with the original TypeScript
+//! implementation, so compatibility tests use it.
+//!
+//! IDs are fixed so the generated files are reproducible.
 
-use crate::model::{Document, Endpoint, PortDirection, Position};
+use crate::model::{Document, Endpoint, PortDirection, PortKind, Position};
 use crate::ops::{
     add_connection, add_module, add_port, assert_valid, create_document, set_module_position, AddConnectionOptions,
     AddModuleOptions, AddPortOptions, CreateDocumentOptions,
@@ -28,6 +39,28 @@ struct Builder {
 }
 
 impl Builder {
+    fn new() -> Self {
+        let doc = create_document(CreateDocumentOptions {
+            title: Some("Authentication Example".into()),
+            description: Some("Reference MDG architecture: a web application with token-based authentication.".into()),
+            root_id: Some("application".into()),
+            root_name: Some("Application".into()),
+            root_description: Some(
+                [
+                    "A small web application with a browser frontend, an HTTP API and a",
+                    "stateless JWT validator.",
+                    "",
+                    "Connections describe *possible* message flow only. Ordering, retries and",
+                    "error handling are described in each module.",
+                ]
+                .join("\n"),
+            ),
+            ..Default::default()
+        })
+        .expect("example document");
+        Builder { doc }
+    }
+
     fn module(&mut self, id: &str, parent_id: &str, name: &str, description: &[&str], position: (f64, f64)) {
         self.doc = add_module(
             &self.doc,
@@ -44,7 +77,15 @@ impl Builder {
         self.doc = set_module_position(&self.doc, id, Position::new(position.0, position.1)).expect("example position");
     }
 
-    fn port(&mut self, direction: PortDirection, module_id: &str, id: &str, name: &str, description: &str) {
+    fn port(
+        &mut self,
+        direction: PortDirection,
+        module_id: &str,
+        id: &str,
+        name: &str,
+        description: &str,
+        response: Option<&str>,
+    ) {
         self.doc = add_port(
             &self.doc,
             module_id,
@@ -52,7 +93,9 @@ impl Builder {
             AddPortOptions {
                 id: Some(id.into()),
                 name: name.into(),
+                kind: if response.is_some() { PortKind::Request } else { PortKind::Event },
                 description: Some(description.into()),
+                response: response.map(str::to_string),
                 ..Default::default()
             },
         )
@@ -61,11 +104,21 @@ impl Builder {
     }
 
     fn input(&mut self, module_id: &str, id: &str, name: &str, description: &str) {
-        self.port(PortDirection::Input, module_id, id, name, description);
+        self.port(PortDirection::Input, module_id, id, name, description, None);
     }
 
     fn output(&mut self, module_id: &str, id: &str, name: &str, description: &str) {
-        self.port(PortDirection::Output, module_id, id, name, description);
+        self.port(PortDirection::Output, module_id, id, name, description, None);
+    }
+
+    /// A request port this module handles.
+    fn handles(&mut self, module_id: &str, id: &str, name: &str, request: &str, response: &str) {
+        self.port(PortDirection::Input, module_id, id, name, request, Some(response));
+    }
+
+    /// A request port this module sends.
+    fn calls(&mut self, module_id: &str, id: &str, name: &str, request: &str, response: &str) {
+        self.port(PortDirection::Output, module_id, id, name, request, Some(response));
     }
 
     fn connect(&mut self, id: &str, from: &str, to: &str) {
@@ -82,26 +135,10 @@ impl Builder {
     }
 }
 
-pub fn create_authentication_example() -> Document {
-    let doc = create_document(CreateDocumentOptions {
-        title: Some("Authentication Example".into()),
-        description: Some("Reference MDG architecture: a web application with token-based authentication.".into()),
-        root_id: Some("application".into()),
-        root_name: Some("Application".into()),
-        root_description: Some(
-            [
-                "A small web application with a browser frontend, an HTTP API and a",
-                "stateless JWT validator.",
-                "",
-                "Connections describe *possible* message flow only. Ordering, retries and",
-                "error handling are described in each module.",
-            ]
-            .join("\n"),
-        ),
-        ..Default::default()
-    })
-    .expect("example document");
-    let mut b = Builder { doc };
+/// The original schema 1.0 example: every exchange is a pair of events.
+/// Byte-identical with the TypeScript implementation's example.
+pub fn create_authentication_example_v1() -> Document {
+    let mut b = Builder::new();
 
     // --- Root level -----------------------------------------------------------
     b.module(
@@ -351,6 +388,261 @@ pub fn create_authentication_example() -> Document {
         "user-routes:token-validation-result",
         "protected-endpoint:token-validation-result",
     );
+
+    assert_valid(&b.doc).expect("the example is valid");
+    b.doc
+}
+
+/// The reference example (schema 1.1): exchanges that expect an answer are
+/// request/response ports; fire-and-forget notifications are events.
+pub fn create_authentication_example() -> Document {
+    let mut b = Builder::new();
+
+    // --- Root level -----------------------------------------------------------
+    b.module(
+        "frontend",
+        "application",
+        "Frontend",
+        &[
+            "Single-page browser application.",
+            "",
+            "- Renders the login form and the user profile page.",
+            "- Stores the session token in memory only (never in `localStorage`).",
+        ],
+        (0.0, 80.0),
+    );
+    b.calls(
+        "frontend",
+        "login",
+        "Log In",
+        "Sends `POST /login` with a username and password typed by the user.",
+        "A signed JWT on success, or an error message on failure.",
+    );
+    b.calls(
+        "frontend",
+        "get-profile",
+        "Get Profile",
+        "Sends `GET /profile` with the session token in the `Authorization` header.",
+        "The user profile, or `401 Unauthorized` when the token was rejected.",
+    );
+
+    b.module(
+        "api-service",
+        "application",
+        "API Service",
+        &[
+            "HTTP API exposed to the frontend.",
+            "",
+            "Delegates authentication to its **Authentication** submodule and serves",
+            "protected resources through **User Routes**. Token validation is",
+            "delegated to the shared **JWT Validator** outside this service.",
+        ],
+        (380.0, 40.0),
+    );
+    b.handles(
+        "api-service",
+        "login",
+        "Login",
+        "`POST /login` with user credentials.",
+        "A JWT on success, or `401` with a reason.",
+    );
+    b.handles(
+        "api-service",
+        "get-profile",
+        "Get Profile",
+        "`GET /profile` carrying a bearer token.",
+        "The profile document, or `401` when the token is invalid.",
+    );
+    b.calls(
+        "api-service",
+        "validate-token",
+        "Validate Token",
+        "A bearer token that must be verified before a protected resource is served.",
+        "`valid` with the token claims, or `invalid` with a reason.",
+    );
+    b.output(
+        "api-service",
+        "security-event",
+        "Security Event",
+        "Emits security-relevant events raised inside the service, such as failed logins.",
+    );
+
+    b.module(
+        "jwt-validator",
+        "application",
+        "JWT Validator",
+        &[
+            "Stateless service that verifies JWT signatures and expiry.",
+            "",
+            "Shared by every service that serves protected resources, so it lives at",
+            "the root level rather than inside the API Service.",
+        ],
+        (820.0, 120.0),
+    );
+    b.handles(
+        "jwt-validator",
+        "validate-token",
+        "Validate Token",
+        "A raw bearer token to verify.",
+        "`valid` with the token claims, or `invalid` with a reason (expired, bad signature, malformed).",
+    );
+
+    b.module(
+        "audit-log",
+        "application",
+        "Audit Log",
+        &["Append-only log of security-relevant events.", "", "Nothing waits for it, so it only listens to events."],
+        (820.0, 320.0),
+    );
+    b.input(
+        "audit-log",
+        "security-event",
+        "Security Event",
+        "Receives a security-relevant event with a timestamp and the client address.",
+    );
+
+    // --- API Service internals ------------------------------------------------
+    b.module(
+        "authentication",
+        "api-service",
+        "Authentication",
+        &["Turns a set of credentials into a signed session token."],
+        (0.0, 0.0),
+    );
+    b.handles(
+        "authentication",
+        "login",
+        "Login",
+        "Credentials from `POST /login`.",
+        "A signed JWT, or a rejection when the credentials are wrong or the account is locked.",
+    );
+    b.output(
+        "authentication",
+        "login-failed",
+        "Login Failed",
+        "Emits the username and the reason whenever a login is rejected.",
+    );
+
+    b.module(
+        "user-routes",
+        "api-service",
+        "User Routes",
+        &["Routes for user-owned resources. Every route requires a valid token."],
+        (0.0, 240.0),
+    );
+    b.handles(
+        "user-routes",
+        "get-profile",
+        "Get Profile",
+        "`GET /profile` requests.",
+        "The profile, or a `401` response.",
+    );
+    b.calls(
+        "user-routes",
+        "validate-token",
+        "Validate Token",
+        "A bearer token that needs verification.",
+        "The validation verdict for the token.",
+    );
+
+    // --- Authentication internals ---------------------------------------------
+    b.module(
+        "credential-validator",
+        "authentication",
+        "Credential Validator",
+        &[
+            "Checks a username/password pair against the user store and, when it",
+            "matches, asks the **Token Issuer** for a session token.",
+            "",
+            "Passwords are compared using a constant-time hash comparison.",
+        ],
+        (0.0, 40.0),
+    );
+    b.handles(
+        "credential-validator",
+        "check-credentials",
+        "Check Credentials",
+        "A username and password.",
+        "A signed JWT for the authenticated user, or a rejection reason.",
+    );
+    b.calls(
+        "credential-validator",
+        "issue-token",
+        "Issue Token",
+        "The authenticated user ID.",
+        "A signed JWT for that user.",
+    );
+    b.output(
+        "credential-validator",
+        "credentials-rejected",
+        "Credentials Rejected",
+        "Emits the username and the reason when the credentials are wrong or the account is locked.",
+    );
+
+    b.module(
+        "token-issuer",
+        "authentication",
+        "Token Issuer",
+        &["Signs a JWT for an authenticated user. Tokens expire after 15 minutes."],
+        (320.0, 0.0),
+    );
+    b.handles("token-issuer", "issue-token", "Issue Token", "An authenticated user ID.", "The signed JWT.");
+
+    // --- User Routes internals ------------------------------------------------
+    b.module(
+        "protected-endpoint",
+        "user-routes",
+        "Protected Endpoint",
+        &[
+            "Serves `GET /profile`.",
+            "",
+            "1. Extracts the bearer token from the request.",
+            "2. Asks for the token to be validated and waits for the verdict.",
+            "3. When the verdict is `valid`, loads and returns the profile;",
+            "   otherwise responds with `401 Unauthorized`.",
+            "",
+            "The numbered steps describe behaviour; MDG connections themselves do not",
+            "imply any ordering.",
+        ],
+        (0.0, 40.0),
+    );
+    b.handles(
+        "protected-endpoint",
+        "get-profile",
+        "Get Profile",
+        "`GET /profile` with a bearer token.",
+        "The profile document, or `401 Unauthorized`.",
+    );
+    b.calls(
+        "protected-endpoint",
+        "validate-token",
+        "Validate Token",
+        "The extracted bearer token.",
+        "The validation verdict for the token.",
+    );
+
+    // --- Connections ----------------------------------------------------------
+    // A request connection runs caller -> handler; the response returns over it.
+    // Root
+    b.connect("root-login", "frontend:login", "api-service:login");
+    b.connect("root-profile", "frontend:get-profile", "api-service:get-profile");
+    b.connect("root-validate-token", "api-service:validate-token", "jwt-validator:validate-token");
+    b.connect("root-security-event", "api-service:security-event", "audit-log:security-event");
+
+    // API Service
+    b.connect("api-login", "api-service:login", "authentication:login");
+    b.connect("api-profile", "api-service:get-profile", "user-routes:get-profile");
+    b.connect("api-validate-token", "user-routes:validate-token", "api-service:validate-token");
+    b.connect("api-login-failed", "authentication:login-failed", "api-service:security-event");
+
+    // Authentication
+    b.connect("auth-check", "authentication:login", "credential-validator:check-credentials");
+    b.connect("auth-issue", "credential-validator:issue-token", "token-issuer:issue-token");
+    b.connect("auth-failed", "credential-validator:credentials-rejected", "authentication:login-failed");
+
+    // User Routes
+    b.connect("routes-profile", "user-routes:get-profile", "protected-endpoint:get-profile");
+    b.connect("routes-validate-token", "protected-endpoint:validate-token", "user-routes:validate-token");
 
     assert_valid(&b.doc).expect("the example is valid");
     b.doc

@@ -13,7 +13,7 @@ Two versions are tracked independently:
 | Version | Where | Controls | Current |
 |---|---|---|---|
 | Container version | header bytes 4–7 | binary layout | `1.0` |
-| Schema version | index `schemaVersion` | data model | `1.0.0` |
+| Schema version | index `schemaVersion` | data model | `1.2.0` (`1.1.0` without tags, `1.0.0` also without request ports) |
 
 Readers reject an unknown **container major** and an unknown **schema major**
 with an explicit "unsupported version" error. Nothing is reinterpreted
@@ -74,8 +74,63 @@ rejected, so files stay readable by JavaScript implementations.
   direct children. Port direction is never stored: it comes from whether the
   port is listed in `inputs` or `outputs`.
 - `content` maps content IDs to absolute byte ranges. Content IDs are
-  `module/<moduleId>` and `port/<moduleId>/<portId>`. They are unambiguous
+  `module/<moduleId>`, `port/<moduleId>/<portId>` and, for a request port's
+  response, `port/<moduleId>/<portId>/response`. They are unambiguous
   because IDs cannot contain `/` or `:`.
+
+### Port kinds (schema 1.1)
+
+A port record may carry `"kind"`: `"event"` (the default, normally omitted)
+or `"request"`. A request port also has a `responseRef` to its response
+contract; `descriptionRef` holds the request contract. An event port must
+not have a `responseRef`.
+
+```json
+{ "id": "validate-token", "name": "Validate Token", "kind": "request",
+  "descriptionRef": "port/api-service/validate-token",
+  "responseRef": "port/api-service/validate-token/response" }
+```
+
+A request port in `outputs` sends the request (the caller); one in `inputs`
+handles it (the handler). A connection between request ports runs from
+caller to handler and carries the response back implicitly. Both ends of a
+connection must be the same kind (`PORT_KIND_MISMATCH` otherwise).
+
+Writers emit `schemaVersion` `1.1.0` when a document has a request port, and
+keep the document's version otherwise. Event-only documents therefore stay
+`1.0.0` and byte-identical with schema 1.0 writers. A 1.0 reader rejects
+`kind` and `responseRef` as unknown fields rather than misreading them.
+### Tags (schema 1.2)
+
+The index may carry a top-level `tags` array: the document's tag list, in
+display order. A module record may carry `tags`: the IDs of the tags it
+carries, in order. Both are optional.
+
+```json
+"tags": [
+  { "id": "done", "name": "done", "color": "#2a8a4a" },
+  { "id": "partially-done", "name": "partially done", "color": "#d4a017" },
+  { "id": "not-done", "name": "not done", "color": "#c43b3b" },
+  { "id": "to-implement", "name": "to implement", "color": "#3b6fd8" }
+]
+```
+
+```json
+"api-service": { "id": "api-service", ..., "connections": [...], "tags": ["done"] }
+```
+
+- Tag records are strict (`id`, `name`, `color`). IDs follow the usual ID
+  syntax and are unique in the document; colours are `#rrggbb`.
+- Every tag ID on a module must be in the tag list (`UNKNOWN_TAG`), at most
+  once (`DUPLICATE_MODULE_TAG`). The list itself rejects duplicate IDs
+  (`DUPLICATE_TAG_ID`) and malformed colours (`INVALID_TAG_COLOR`).
+- A document without a `tags` array has the four default tags above. Writers
+  omit `tags` (and module `tags`) when the list equals the defaults and no
+  module is tagged, so such documents keep their schema version and bytes.
+  Otherwise they write the full list and `schemaVersion` `1.2.0`. An empty
+  list is written as `[]`.
+- A 1.0 or 1.1 reader rejects a module's `tags` as an unknown field.
+
 - `layout` is optional presentation metadata with no effect on message-flow
   semantics; validation ignores it. `positions` holds each module's position
   in its parent's canvas. The optional `boundaries` holds, per module, the
@@ -104,8 +159,10 @@ Writing an unchanged document always produces identical bytes:
 - modules (index order and block order) are sorted by module ID in
   UTF-16 code-unit order;
 - each module's blocks are ordered: description, inputs (stored order),
-  outputs (stored order);
+  outputs (stored order), each request port's response directly after its
+  description;
 - ports, `childIds` and connections keep their stored order;
+- tags keep their stored order, and so do each module's tag IDs;
 - layout positions, unknown metadata and extension keys are sorted by key;
   nested extension objects are written with sorted keys;
 - no timestamps or random values are written.
@@ -113,7 +170,7 @@ Writing an unchanged document always produces identical bytes:
 The index is written exactly like JavaScript's `JSON.stringify`: no
 whitespace, numbers in JavaScript's shortest form (`380`, not `380.0`), and
 object keys in JavaScript enumeration order (keys that are canonical
-integers, such as a module ID `10`, come first in ascending order). Files
+integers, such as a module ID `10`, come first in ascending order). Files without request ports
 written by this implementation and by the original TypeScript one are
 byte-identical.
 

@@ -4,7 +4,7 @@ use crate::error::Result;
 use crate::ids::{assert_valid_id, with_generator, IdGenerator, IdKind};
 use crate::js;
 use crate::jsmap::JsMap;
-use crate::model::{Document, Metadata, Module, SCHEMA_VERSION};
+use crate::model::{default_tags, Document, Metadata, Module, SCHEMA_VERSION};
 
 #[derive(Default)]
 pub struct CreateDocumentOptions<'a> {
@@ -42,6 +42,7 @@ pub fn create_document(options: CreateDocumentOptions<'_>) -> Result<Document> {
         outputs: vec![],
         child_ids: vec![],
         connections: vec![],
+        tags: vec![],
     };
     let mut modules = JsMap::new();
     modules.insert(root_id.clone(), Arc::new(root));
@@ -50,6 +51,7 @@ pub fn create_document(options: CreateDocumentOptions<'_>) -> Result<Document> {
         root_id,
         modules,
         metadata: Metadata { title, description: options.description, extra: JsMap::new() },
+        tags: default_tags(),
         layout: None,
         extensions: None,
     })

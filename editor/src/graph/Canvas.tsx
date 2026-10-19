@@ -14,12 +14,21 @@ import {
   type OnConnectStart,
   type OnNodeDrag,
 } from '@xyflow/react';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { commands, queries, type Endpoint } from '../api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { commands, queries, type Endpoint, type PortKind } from '../api';
 import { boundaryKey } from '../state/layoutKeys';
+import { usePreferences, type NodeColoring } from '../state/preferences';
 import { getView, run, useEditor } from '../state/store';
 import { layoutAll, layoutChildren, type Size } from './autoLayout';
-import { boundarySideOf, buildGraph, endpointNodeId, nodeToModuleId, type FlowNode } from './buildGraph';
+import {
+  boundarySideOf,
+  buildGraph,
+  endpointKind,
+  endpointNodeId,
+  kindColor,
+  nodeToModuleId,
+  type FlowNode,
+} from './buildGraph';
 import { nodeTypes } from './nodes';
 
 function toEndpoints(connection: Connection | Edge, currentModuleId: string): { from: Endpoint; to: Endpoint } | null {
@@ -72,12 +81,15 @@ function ModuleCanvas({ currentModuleId }: { currentModuleId: string }) {
   // edit would reject. Until the answer arrives (a very fast drag), drops are
   // allowed: `connect` validates again and reports a rejection as an error.
   const partners = useRef<{ from: 'source' | 'target'; keys: Set<string> } | null>(null);
+  // The line being dragged takes the colour of the port it starts from.
+  const [dragKind, setDragKind] = useState<PortKind>('event');
 
   const onConnectStart: OnConnectStart = useCallback(
     (_event, { nodeId, handleId, handleType }) => {
       partners.current = null;
       if (!nodeId || !handleId || !handleType) return;
       const endpoint = { moduleId: nodeToModuleId(nodeId, currentModuleId), portId: handleId };
+      setDragKind(endpointKind(getView().document, endpoint));
       const otherRole = handleType === 'source' ? 'target' : 'source';
       void queries.connectionPartners(endpoint, handleType).then((list) => {
         const keys = new Set(list.map((ep) => handleKey(endpointNodeId(ep, currentModuleId, otherRole), ep.portId)));
@@ -130,7 +142,23 @@ function ModuleCanvas({ currentModuleId }: { currentModuleId: string }) {
     void run(commands.select({ kind: 'connection', connectionId: edge.id }));
   }, []);
 
-  const onPaneClick = useCallback(() => void run(commands.select(null)), []);
+  const onPaneClick = useCallback(() => {
+    setMenu(null);
+    void run(commands.select(null));
+  }, []);
+
+  // Right-clicking empty canvas offers to add a module there; right-clicking
+  // anything else only suppresses the webview's own menu.
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const onPaneContextMenu = useCallback((event: MouseEvent | React.MouseEvent) => {
+    event.preventDefault();
+    setMenu({ x: event.clientX, y: event.clientY });
+  }, []);
+  const suppressContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    setMenu(null);
+  }, []);
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   return (
     <div className="canvas" data-testid="canvas">
@@ -141,12 +169,17 @@ function ModuleCanvas({ currentModuleId }: { currentModuleId: string }) {
         onNodesChange={onNodesChange}
         onNodeDragStop={onNodeDragStop}
         onConnectStart={onConnectStart}
+        connectionLineStyle={{ stroke: kindColor(dragKind) }}
         onConnect={onConnect}
         isValidConnection={isValidConnection}
         onNodeClick={onNodeClick}
         onNodeDoubleClick={onNodeDoubleClick}
         onEdgeClick={onEdgeClick}
         onPaneClick={onPaneClick}
+        onPaneContextMenu={onPaneContextMenu}
+        onNodeContextMenu={suppressContextMenu}
+        onEdgeContextMenu={suppressContextMenu}
+        onMoveStart={closeMenu}
         zoomOnDoubleClick={false}
         deleteKeyCode={null}
         fitView
@@ -158,9 +191,79 @@ function ModuleCanvas({ currentModuleId }: { currentModuleId: string }) {
         <Background gap={20} />
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable />
+        <ColoringPanel />
         <LayoutPanel />
+        {menu && <PaneMenu at={menu} onClose={closeMenu} />}
       </ReactFlow>
     </div>
+  );
+}
+
+/**
+ * Context menu for empty canvas. Rendered inside React Flow so it can map the
+ * click point to graph coordinates for the new module's position.
+ */
+function PaneMenu({ at, onClose }: { at: { x: number; y: number }; onClose: () => void }) {
+  const flow = useReactFlow();
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as globalThis.Node)) onClose();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('blur', onClose);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('blur', onClose);
+    };
+  }, [onClose]);
+
+  const addModule = () => {
+    const p = flow.screenToFlowPosition(at);
+    onClose();
+    void run(commands.addChildModule({ x: Math.round(p.x), y: Math.round(p.y) }));
+  };
+
+  return (
+    <div
+      ref={ref}
+      className="context-menu"
+      style={{ left: at.x, top: at.y }}
+      role="menu"
+      onContextMenu={(e) => e.preventDefault()}
+      data-testid="canvas-context-menu"
+    >
+      <button role="menuitem" onClick={addModule} data-testid="context-add-module">
+        + New module
+      </button>
+    </div>
+  );
+}
+
+/** How module nodes are coloured: one solid colour, or by their tags. */
+function ColoringPanel() {
+  const coloring = usePreferences((s) => s.nodeColoring);
+  const setColoring = usePreferences((s) => s.setNodeColoring);
+  return (
+    <Panel position="top-left" className="coloring-panel">
+      <label>
+        <span className="coloring-label">Module colour</span>
+        <select
+          value={coloring}
+          onChange={(e) => setColoring(e.target.value as NodeColoring)}
+          data-testid="node-coloring"
+        >
+          <option value="solid">Solid colour</option>
+          <option value="tags">Tag colour</option>
+        </select>
+      </label>
+    </Panel>
   );
 }
 

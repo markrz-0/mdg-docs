@@ -6,13 +6,17 @@ use indexmap::IndexSet;
 use super::{insert_at, require_name, update_module, CreateResult};
 use crate::error::{MdgError, Result};
 use crate::ids::{assert_valid_id, with_generator, IdGenerator, IdKind};
-use crate::model::{Document, Port, PortDirection};
+use crate::model::{schema_version_for, Document, Port, PortDirection, PortKind};
 use crate::queries::{connections_referencing, find_port, get_module, get_port};
 
 #[derive(Default)]
 pub struct AddPortOptions<'a> {
     pub name: String,
+    /// Event (default) or request/response.
+    pub kind: PortKind,
     pub description: Option<String>,
+    /// Response contract. Request ports only.
+    pub response: Option<String>,
     /// Explicit ID, unique within the module. Generated when omitted.
     pub id: Option<String>,
     /// Position in the inputs/outputs list. Appended when omitted.
@@ -39,12 +43,19 @@ pub fn add_port(
     if find_port(module, &id).is_some() {
         return Err(MdgError::argument(format!("Module \"{module_id}\" already has a port with ID \"{id}\".")));
     }
+    let response = options.response.unwrap_or_default();
+    if options.kind == PortKind::Event && !response.is_empty() {
+        return Err(MdgError::argument("Only request ports have a response."));
+    }
     let port = Port {
         id: id.clone(),
         name: require_name(&options.name, "Port")?,
+        kind: options.kind,
         description: options.description.unwrap_or_default(),
+        response,
     };
-    let document = update_module(doc, module_id, |m| insert_at(m.ports_mut(direction), port, options.index))?;
+    let mut document = update_module(doc, module_id, |m| insert_at(m.ports_mut(direction), port, options.index))?;
+    document.format_version = schema_version_for(&document);
     Ok(CreateResult { document, id })
 }
 
@@ -100,4 +111,40 @@ pub fn rename_port(doc: &Document, module_id: &str, port_id: &str, name: &str) -
 
 pub fn update_port_description(doc: &Document, module_id: &str, port_id: &str, description: &str) -> Result<Document> {
     update_port(doc, module_id, port_id, |p| p.description = description.to_string())
+}
+
+/// Replaces a request port's response contract.
+pub fn update_port_response(doc: &Document, module_id: &str, port_id: &str, response: &str) -> Result<Document> {
+    if get_port(doc, module_id, port_id)?.port.kind != PortKind::Request {
+        return Err(MdgError::operation(format!(
+            "Port \"{module_id}:{port_id}\" is an event port. Only request ports have a response."
+        )));
+    }
+    update_port(doc, module_id, port_id, |p| p.response = response.to_string())
+}
+
+/// Turns a port into an event port or a request/response port. A connected
+/// port keeps its kind: both ends of a connection must be the same kind, so
+/// disconnect it first. Switching to an event drops the response contract.
+pub fn set_port_kind(doc: &Document, module_id: &str, port_id: &str, kind: PortKind) -> Result<Document> {
+    if get_port(doc, module_id, port_id)?.port.kind == kind {
+        return Ok(doc.clone());
+    }
+    let referencing = connections_referencing(doc, module_id, Some(port_id))?;
+    if !referencing.is_empty() {
+        let ids: Vec<&str> = referencing.iter().map(|r| r.connection.id.as_str()).collect();
+        return Err(MdgError::operation(format!(
+            "Port \"{module_id}:{port_id}\" is used by {} connection(s): {}. Both ends of a connection must be the same kind; disconnect them first.",
+            ids.len(),
+            ids.join(", ")
+        )));
+    }
+    let mut document = update_port(doc, module_id, port_id, |p| {
+        p.kind = kind;
+        if kind == PortKind::Event {
+            p.response.clear();
+        }
+    })?;
+    document.format_version = schema_version_for(&document);
+    Ok(document)
 }

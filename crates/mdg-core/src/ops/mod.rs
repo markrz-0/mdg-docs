@@ -7,6 +7,7 @@ mod document;
 mod modules;
 mod ports;
 mod routing;
+mod tags;
 mod transaction;
 
 use std::sync::Arc;
@@ -16,6 +17,7 @@ pub use document::*;
 pub use modules::*;
 pub use ports::*;
 pub use routing::*;
+pub use tags::*;
 pub use transaction::*;
 
 use crate::error::{MdgError, Result};

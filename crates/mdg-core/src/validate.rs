@@ -11,7 +11,7 @@ use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 
 use crate::ids::is_valid_id;
-use crate::model::{Document, Endpoint, Module, PortDirection};
+use crate::model::{is_valid_color, Document, Endpoint, Module, PortDirection, PortKind};
 use crate::queries::{find_module, find_port};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -54,6 +54,12 @@ pub enum IssueCode {
     ConnectionOutOfScope,
     InvalidSourceDirection,
     InvalidDestinationDirection,
+    PortKindMismatch,
+    ResponseOnEventPort,
+    DuplicateTagId,
+    InvalidTagColor,
+    UnknownTag,
+    DuplicateModuleTag,
     // warnings
     UnconnectedPort,
     DuplicateConnection,
@@ -82,6 +88,12 @@ impl IssueCode {
             IssueCode::ConnectionOutOfScope => "CONNECTION_OUT_OF_SCOPE",
             IssueCode::InvalidSourceDirection => "INVALID_SOURCE_DIRECTION",
             IssueCode::InvalidDestinationDirection => "INVALID_DESTINATION_DIRECTION",
+            IssueCode::PortKindMismatch => "PORT_KIND_MISMATCH",
+            IssueCode::ResponseOnEventPort => "RESPONSE_ON_EVENT_PORT",
+            IssueCode::DuplicateTagId => "DUPLICATE_TAG_ID",
+            IssueCode::InvalidTagColor => "INVALID_TAG_COLOR",
+            IssueCode::UnknownTag => "UNKNOWN_TAG",
+            IssueCode::DuplicateModuleTag => "DUPLICATE_MODULE_TAG",
             IssueCode::UnconnectedPort => "UNCONNECTED_PORT",
             IssueCode::DuplicateConnection => "DUPLICATE_CONNECTION",
         }
@@ -290,7 +302,43 @@ pub fn check_connection(
     let mut issues = Vec::new();
     issues.extend(check_endpoint(doc, container, from, Role::Source, connection_id));
     issues.extend(check_endpoint(doc, container, to, Role::Destination, connection_id));
+    if issues.is_empty() {
+        issues.extend(check_kinds(doc, container_id, from, to, connection_id));
+    }
     issues
+}
+
+/// Both ends of a connection must carry the same kind of message: events
+/// connect to events, requests to requests. Only called once both endpoints
+/// are known to exist.
+fn check_kinds(
+    doc: &Document,
+    container_id: &str,
+    from: &Endpoint,
+    to: &Endpoint,
+    connection_id: Option<&str>,
+) -> Option<ValidationIssue> {
+    let kind =
+        |ep: &Endpoint| find_module(doc, &ep.module_id).and_then(|m| find_port(m, &ep.port_id)).map(|p| p.port.kind);
+    let (from_kind, to_kind) = (kind(from)?, kind(to)?);
+    if from_kind == to_kind {
+        return None;
+    }
+    let label = match connection_id {
+        None => "Connection".to_string(),
+        Some(id) => format!("Connection \"{id}\""),
+    };
+    Some(ValidationIssue {
+        severity: Severity::Error,
+        code: IssueCode::PortKindMismatch,
+        message: format!(
+            "{label} in \"{container_id}\" joins {from_kind} port \"{from}\" to {to_kind} port \"{to}\". Both ends must be the same kind (event or request)."
+        ),
+        module_id: Some(container_id.to_string()),
+        port_id: None,
+        connection_id: connection_id.map(str::to_string),
+        layout: IssueLayout::Endpoint,
+    })
 }
 
 #[derive(Default)]
@@ -420,6 +468,34 @@ fn check_module_local(doc: &Document, key: &str, module: &Module, ctx: &mut Cont
                 format!("Port ID \"{}\" on module \"{key}\" is not a valid ID.", port.id),
             )
             .port_id = Some(port.id.clone());
+        }
+        if port.kind == PortKind::Event && !port.response.is_empty() {
+            ctx.error(
+                IssueCode::ResponseOnEventPort,
+                key,
+                format!(
+                    "Event port \"{key}:{}\" has a response contract. Only request ports have a response.",
+                    port.id
+                ),
+            )
+            .port_id = Some(port.id.clone());
+        }
+    }
+
+    let mut tags: HashSet<&str> = HashSet::new();
+    for tag_id in &module.tags {
+        if !tags.insert(tag_id) {
+            ctx.error(
+                IssueCode::DuplicateModuleTag,
+                key,
+                format!("Module \"{key}\" carries tag \"{tag_id}\" more than once."),
+            );
+        } else if doc.find_tag(tag_id).is_none() {
+            ctx.error(
+                IssueCode::UnknownTag,
+                key,
+                format!("Module \"{key}\" carries tag \"{tag_id}\", which is not in the document's tag list."),
+            );
         }
     }
 
@@ -568,12 +644,44 @@ fn check_unconnected_ports(doc: &Document, ctx: &mut Context) {
     }
 }
 
+/// Checks the document's tag list: unique, valid IDs and `#rrggbb` colours.
+/// Tag issues belong to no module.
+fn check_tags(doc: &Document, ctx: &mut Context) {
+    let mut seen: HashSet<&str> = HashSet::new();
+    for tag in &doc.tags {
+        let mut push = |code: IssueCode, message: String| {
+            ctx.errors.push(ValidationIssue {
+                severity: Severity::Error,
+                code,
+                message,
+                module_id: None,
+                port_id: None,
+                connection_id: None,
+                layout: IssueLayout::Standard,
+            })
+        };
+        if !seen.insert(&tag.id) {
+            push(IssueCode::DuplicateTagId, format!("The document defines tag \"{}\" more than once.", tag.id));
+        }
+        if !is_valid_id(&tag.id) {
+            push(IssueCode::InvalidId, format!("Tag ID \"{}\" is not a valid ID.", tag.id));
+        }
+        if !is_valid_color(&tag.color) {
+            push(
+                IssueCode::InvalidTagColor,
+                format!("Tag \"{}\" has colour \"{}\"; colours must be #rrggbb.", tag.id, tag.color),
+            );
+        }
+    }
+}
+
 /// Validates the entire document.
 pub fn validate_document(doc: &Document, options: ValidationOptions) -> ValidationResult {
     let mut ctx = Context::default();
     if find_module(doc, &doc.root_id).is_none() {
         ctx.error(IssueCode::RootMissing, &doc.root_id, format!("Root module \"{}\" does not exist.", doc.root_id));
     }
+    check_tags(doc, &mut ctx);
     for (key, module) in doc.modules.iter() {
         check_module_local(doc, key, module, &mut ctx);
     }

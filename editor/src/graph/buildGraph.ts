@@ -1,5 +1,16 @@
 import type { Edge, Node } from '@xyflow/react';
-import type { DocumentView, Endpoint, Module, Port, Position, Selection } from '../api';
+import {
+  moduleTags,
+  portKind,
+  type DocumentView,
+  type Endpoint,
+  type Module,
+  type Port,
+  type PortKind,
+  type Position,
+  type Selection,
+  type Tag,
+} from '../api';
 import { boundaryKey, type BoundarySide } from '../state/layoutKeys';
 
 /**
@@ -21,11 +32,15 @@ export const NODE_WIDTH = 300;
 export interface PortView {
   id: string;
   name: string;
+  kind: PortKind;
 }
 
 export type ModuleNodeData = {
   moduleId: string;
   name: string;
+  tags: Tag[];
+  /** Node colour: the tag's colour, or the mix of all its tags' colours; null when untagged. */
+  color: string | null;
   inputs: PortView[];
   outputs: PortView[];
   childCount: number;
@@ -49,7 +64,34 @@ export interface Graph {
   edges: Edge[];
 }
 
-const portView = (p: Port): PortView => ({ id: p.id, name: p.name });
+const portView = (p: Port): PortView => ({ id: p.id, name: p.name, kind: portKind(p) });
+
+/** Kind of the port an endpoint references; event when it cannot be found. */
+export function endpointKind(doc: DocumentView, ep: Endpoint): PortKind {
+  const module = Object.hasOwn(doc.modules, ep.moduleId) ? doc.modules[ep.moduleId] : undefined;
+  const port = module?.inputs.find((p) => p.id === ep.portId) ?? module?.outputs.find((p) => p.id === ep.portId);
+  return port ? portKind(port) : 'event';
+}
+
+/** Highlight colour of a port or connection, by kind. */
+export const kindColor = (kind: PortKind) => (kind === 'request' ? 'var(--request)' : 'var(--accent)');
+
+/** The tags a module carries, resolved from the document's tag list, in the module's order. */
+export function resolveTags(doc: DocumentView, module: Module): Tag[] {
+  return moduleTags(module).flatMap((id) => doc.tags.filter((t) => t.id === id));
+}
+
+/** Mixes `#rrggbb` colours by averaging their channels; null for none. */
+export function mixColors(colors: string[]): string | null {
+  if (colors.length === 0) return null;
+  const channel = (offset: number) => {
+    const sum = colors.reduce((total, c) => total + parseInt(c.slice(offset, offset + 2), 16), 0);
+    return Math.round(sum / colors.length)
+      .toString(16)
+      .padStart(2, '0');
+  };
+  return `#${channel(1)}${channel(3)}${channel(5)}`;
+}
 
 export function getModule(doc: DocumentView, moduleId: string): Module {
   const module = Object.hasOwn(doc.modules, moduleId) ? doc.modules[moduleId] : undefined;
@@ -96,6 +138,8 @@ export function buildGraph(
       data: {
         moduleId: child.id,
         name: child.name,
+        tags: resolveTags(doc, child),
+        color: mixColors(resolveTags(doc, child).map((t) => t.color)),
         inputs: child.inputs.map(portView),
         outputs: child.outputs.map(portView),
         childCount: child.childIds.length,
@@ -134,12 +178,17 @@ export function buildGraph(
     nodes.push(boundary('out'));
   }
 
-  // A selected port lights up every connection from or to it.
-  const port = selection?.kind === 'port' ? selection : null;
-  const touchesPort = (ep: Endpoint) => port !== null && ep.moduleId === port.moduleId && ep.portId === port.portId;
+  // A selected port lights up every connection from or to it, and a selected
+  // module every connection on any of its ports: blue for events, green for
+  // request/response connections.
+  const touches = (ep: Endpoint) =>
+    (selection?.kind === 'port' && ep.moduleId === selection.moduleId && ep.portId === selection.portId) ||
+    (selection?.kind === 'module' && ep.moduleId === selection.moduleId);
 
   const edges: Edge[] = current.connections.map((c) => {
-    const highlighted = touchesPort(c.from) || touchesPort(c.to);
+    const highlighted = touches(c.from) || touches(c.to);
+    const kind = endpointKind(doc, c.from);
+    const classes = [kind === 'request' ? 'request' : null, highlighted ? 'highlighted' : null].filter(Boolean);
     return {
       id: c.id,
       source: endpointNodeId(c.from, current.id, 'source'),
@@ -148,8 +197,9 @@ export function buildGraph(
       targetHandle: c.to.portId,
       selected: selection?.kind === 'connection' && selection.connectionId === c.id,
       deletable: false,
-      markerEnd: { type: 'arrowclosed' as const, ...(highlighted ? { color: 'var(--accent)' } : {}) },
-      ...(highlighted ? { className: 'highlighted' } : {}),
+      data: { kind },
+      markerEnd: { type: 'arrowclosed' as const, ...(highlighted ? { color: kindColor(kind) } : {}) },
+      ...(classes.length > 0 ? { className: classes.join(' ') } : {}),
     };
   });
 

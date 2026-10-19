@@ -43,6 +43,7 @@ pub fn add_module(doc: &Document, options: AddModuleOptions<'_>) -> Result<Creat
         outputs: vec![],
         child_ids: vec![],
         connections: vec![],
+        tags: vec![],
     };
     let mut parent = parent.clone();
     insert_at(&mut parent.child_ids, id.clone(), options.index);

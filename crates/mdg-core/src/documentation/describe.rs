@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::error::Result;
 use crate::js;
-use crate::model::{Connection, Document, Endpoint, Module, Port, PortDirection};
+use crate::model::{Connection, Document, Endpoint, Module, Port, PortDirection, PortKind, Tag};
 use crate::queries::{find_module, find_port, get_module, get_module_path, walk_descendants, WalkOptions};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -18,7 +18,14 @@ pub struct ModuleRef {
 pub struct PortDescription {
     pub id: String,
     pub name: String,
+    /// Omitted for events.
+    #[serde(skip_serializing_if = "PortKind::is_event")]
+    pub kind: PortKind,
+    /// For a request port: the request contract.
     pub description: String,
+    /// Request ports only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -48,6 +55,10 @@ pub struct ModuleDescription {
     pub depth: usize,
     pub parent: Option<ModuleRef>,
     pub path: Vec<ModuleRef>,
+    /// Tags the module carries, resolved from the document's tag list.
+    /// Omitted when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<Tag>,
     pub description: String,
     pub inputs: Vec<PortDescription>,
     pub outputs: Vec<PortDescription>,
@@ -91,8 +102,24 @@ fn module_ref(m: &Module) -> ModuleRef {
     ModuleRef { id: m.id.clone(), name: m.name.clone() }
 }
 
-fn port_description(p: &Port) -> PortDescription {
-    PortDescription { id: p.id.clone(), name: p.name.clone(), description: p.description.clone() }
+pub fn port_description(p: &Port) -> PortDescription {
+    PortDescription {
+        id: p.id.clone(),
+        name: p.name.clone(),
+        kind: p.kind,
+        description: p.description.clone(),
+        response: (p.kind == PortKind::Request).then(|| p.response.clone()),
+    }
+}
+
+/// The tags a module carries, in its order. Unknown tag IDs (an invalid
+/// document) are shown with their ID as the name.
+pub fn module_tags(doc: &Document, module: &Module) -> Vec<Tag> {
+    module
+        .tags
+        .iter()
+        .map(|id| doc.find_tag(id).cloned().unwrap_or_else(|| Tag::new(id.clone(), id.clone(), String::new())))
+        .collect()
 }
 
 fn describe_one(doc: &Document, module: &Module, depth: usize, include_internals: bool) -> Result<ModuleDescription> {
@@ -103,6 +130,7 @@ fn describe_one(doc: &Document, module: &Module, depth: usize, include_internals
         depth,
         parent: parent.map(module_ref),
         path: get_module_path(doc, &module.id)?.into_iter().map(module_ref).collect(),
+        tags: module_tags(doc, module),
         description: module.description.clone(),
         inputs: module.inputs.iter().map(port_description).collect(),
         outputs: module.outputs.iter().map(port_description).collect(),
@@ -166,7 +194,32 @@ pub fn format_endpoint(ep: &EndpointDescription) -> String {
     format!("{} › {} ({id})", ep.module_name, ep.port_name)
 }
 
-fn render_ports(lines: &mut Vec<String>, title: &str, ports: &[PortDescription]) {
+/// How a request port takes part in the exchange, from its direction.
+pub fn request_role(direction: PortDirection) -> &'static str {
+    match direction {
+        PortDirection::Input => "request/response, handled here",
+        PortDirection::Output => "request/response, sent from here",
+    }
+}
+
+/// Appends one port's section. Event ports have a single contract; request
+/// ports have a request and a response contract.
+pub fn render_port(lines: &mut Vec<String>, p: &PortDescription, direction: PortDirection) {
+    lines.push(format!("### {}", p.name));
+    lines.push(format!("- ID: `{}`", p.id));
+    let Some(response) = &p.response else {
+        lines.push(String::new());
+        lines.push(body(&p.description));
+        lines.push(String::new());
+        return;
+    };
+    lines.push(format!("- Kind: {}", request_role(direction)));
+    lines.push(String::new());
+    lines.extend(["#### Request".to_string(), String::new(), body(&p.description), String::new()]);
+    lines.extend(["#### Response".to_string(), String::new(), body(response), String::new()]);
+}
+
+fn render_ports(lines: &mut Vec<String>, title: &str, ports: &[PortDescription], direction: PortDirection) {
     lines.push(format!("## {title}"));
     lines.push(String::new());
     if ports.is_empty() {
@@ -175,11 +228,7 @@ fn render_ports(lines: &mut Vec<String>, title: &str, ports: &[PortDescription])
         return;
     }
     for p in ports {
-        lines.push(format!("### {}", p.name));
-        lines.push(format!("- ID: `{}`", p.id));
-        lines.push(String::new());
-        lines.push(body(&p.description));
-        lines.push(String::new());
+        render_port(lines, p, direction);
     }
 }
 
@@ -194,10 +243,14 @@ pub fn render_module_section(m: &ModuleDescription, link_for: Option<&dyn Fn(&st
     });
     let path: Vec<&str> = m.path.iter().map(|p| p.name.as_str()).collect();
     lines.push(format!("- Path: {}", path.join(" / ")));
+    if !m.tags.is_empty() {
+        let tags: Vec<String> = m.tags.iter().map(|t| format!("{} (`{}`)", t.name, t.id)).collect();
+        lines.push(format!("- Tags: {}", tags.join(", ")));
+    }
     lines.push(String::new());
     lines.extend(["## Description".to_string(), String::new(), body(&m.description), String::new()]);
-    render_ports(&mut lines, "Inputs", &m.inputs);
-    render_ports(&mut lines, "Outputs", &m.outputs);
+    render_ports(&mut lines, "Inputs", &m.inputs, PortDirection::Input);
+    render_ports(&mut lines, "Outputs", &m.outputs, PortDirection::Output);
     if let Some(children) = &m.children {
         lines.extend(["## Submodules".to_string(), String::new()]);
         if children.is_empty() {

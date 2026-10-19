@@ -5,17 +5,18 @@
 use std::path::Path;
 
 use mdg_core::{
-    add_connection, add_module, add_port, assert_valid, create_document, get_connection, get_module, move_module,
-    read_mdg, remove_connection, remove_module, remove_port, rename_module, rename_port, route_connection,
-    update_module_description, update_port_description, write_mdg, AddConnectionOptions, AddModuleOptions,
-    AddPortOptions, CreateDocumentOptions, Document, JsMap, MdgError, PortDirection, Result, RouteOptions, RouteStep,
+    add_connection, add_module, add_port, add_tag, assert_valid, create_document, get_connection, get_module,
+    move_module, read_mdg, remove_connection, remove_module, remove_port, remove_tag, rename_module, rename_port,
+    route_connection, set_port_kind, tag_module, untag_module, update_module_description, update_port_description,
+    update_port_response, update_tag, write_mdg, AddConnectionOptions, AddModuleOptions, AddPortOptions, AddTagOptions,
+    CreateDocumentOptions, Document, JsMap, MdgError, PortDirection, PortKind, Result, RouteOptions, RouteStep,
 };
 use serde_json::{json, Map, Value};
 
 use crate::commander::Parsed;
 use crate::program::Action;
-use crate::resolve::{resolve_endpoint, resolve_module_id, resolve_port_id};
-use crate::shared::{read_description, Context};
+use crate::resolve::{resolve_endpoint, resolve_module_id, resolve_port_id, resolve_tag_id};
+use crate::shared::{read_description, read_markdown, Context};
 
 type Args = Parsed<Action>;
 
@@ -58,6 +59,18 @@ fn require_description(description: Option<String>) -> Result<String> {
 
 fn description_options(ctx: &mut Context<'_>, p: &Args) -> Result<Option<String>> {
     read_description(ctx, p.string("description"), p.string("descriptionFile"))
+}
+
+fn response_options(ctx: &mut Context<'_>, p: &Args) -> Result<Option<String>> {
+    read_markdown(ctx, "response", p.string("response"), p.string("responseFile"))
+}
+
+fn parse_kind(name: &str) -> Result<PortKind> {
+    match name {
+        "event" => Ok(PortKind::Event),
+        "request" => Ok(PortKind::Request),
+        other => Err(MdgError::argument(format!("Unknown port kind \"{other}\". Use \"event\" or \"request\"."))),
+    }
 }
 
 pub fn new(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
@@ -177,10 +190,86 @@ pub fn module_set_description(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
     })
 }
 
+/// `module tag` (`add`) and `module untag`.
+pub fn module_tag(ctx: &mut Context<'_>, p: &Args, add: bool) -> Result<()> {
+    run_edit(ctx, p, |doc| {
+        let module_id = resolve_module_id(doc, &p.args[1])?;
+        let tag_ids = p.args[2..].iter().map(|t| resolve_tag_id(doc, t)).collect::<Result<Vec<_>>>()?;
+        let document =
+            if add { tag_module(doc, &module_id, &tag_ids)? } else { untag_module(doc, &module_id, &tag_ids)? };
+        let tags = get_module(&document, &module_id)?.tags.clone();
+        let shown = if tags.is_empty() { "none".to_string() } else { tags.join(", ") };
+        Ok(Outcome {
+            document,
+            message: format!("Tags of {module_id}: {shown}"),
+            result: vec![("moduleId", json!(module_id)), ("tags", json!(tags))],
+        })
+    })
+}
+
+pub fn tag_add(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
+    run_edit(ctx, p, |doc| {
+        let result = add_tag(
+            doc,
+            AddTagOptions {
+                name: p.string("name").unwrap_or_default(),
+                color: p.string("color").unwrap_or_default(),
+                id: p.string("id"),
+                ..Default::default()
+            },
+        )?;
+        let tag = result.document.find_tag(&result.id).expect("tag was added").clone();
+        Ok(Outcome {
+            document: result.document,
+            message: format!("Added tag {} \"{}\" ({})", tag.id, tag.name, tag.color),
+            result: vec![("tag", json!(tag))],
+        })
+    })
+}
+
+pub fn tag_update(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
+    let (name, color) = (p.string("name"), p.string("color"));
+    if name.is_none() && color.is_none() {
+        return Err(MdgError::argument("Provide --name and/or --color."));
+    }
+    run_edit(ctx, p, |doc| {
+        let tag_id = resolve_tag_id(doc, &p.args[1])?;
+        let document = update_tag(doc, &tag_id, name.as_deref(), color.as_deref())?;
+        let tag = document.find_tag(&tag_id).expect("tag exists").clone();
+        Ok(Outcome {
+            document,
+            message: format!("Updated tag {} \"{}\" ({})", tag.id, tag.name, tag.color),
+            result: vec![("tag", json!(tag))],
+        })
+    })
+}
+
+pub fn tag_remove(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
+    run_edit(ctx, p, |doc| {
+        let tag_id = resolve_tag_id(doc, &p.args[1])?;
+        let untagged: Vec<&str> =
+            doc.modules.iter().filter(|(_, m)| m.tags.contains(&tag_id)).map(|(id, _)| id).collect();
+        let mut message = format!("Removed tag {tag_id}");
+        if !untagged.is_empty() {
+            message.push_str(&format!(" from the document and {} module(s): {}", untagged.len(), untagged.join(", ")));
+        }
+        Ok(Outcome {
+            document: remove_tag(doc, &tag_id)?,
+            message,
+            result: vec![("tagId", json!(tag_id)), ("untaggedModules", json!(untagged))],
+        })
+    })
+}
+
 pub fn port_add(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
     let description = description_options(ctx, p)?;
+    let response = response_options(ctx, p)?;
     let direction_name = p.string("direction").unwrap_or_default();
     let direction = if direction_name == "input" { PortDirection::Input } else { PortDirection::Output };
+    let kind = parse_kind(p.string("kind").as_deref().unwrap_or("event"))?;
+    if kind == PortKind::Event && response.is_some() {
+        return Err(MdgError::argument("--response and --response-file require --kind request."));
+    }
     run_edit(ctx, p, |doc| {
         let module_id = resolve_module_id(doc, &p.args[1])?;
         let result = add_port(
@@ -189,15 +278,56 @@ pub fn port_add(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
             direction,
             AddPortOptions {
                 name: p.string("name").unwrap_or_default(),
+                kind,
                 description,
+                response,
                 id: p.string("id"),
                 ..Default::default()
             },
         )?;
+        let mut details =
+            vec![("moduleId", json!(module_id)), ("portId", json!(result.id)), ("direction", json!(direction))];
+        let what = match kind {
+            PortKind::Event => direction.to_string(),
+            PortKind::Request => {
+                details.push(("kind", json!(kind)));
+                format!("request {direction}")
+            }
+        };
         Ok(Outcome {
             document: result.document,
-            message: format!("Added {direction} {module_id}:{}", result.id),
-            result: vec![("moduleId", json!(module_id)), ("portId", json!(result.id)), ("direction", json!(direction))],
+            message: format!("Added {what} {module_id}:{}", result.id),
+            result: details,
+        })
+    })
+}
+
+pub fn port_set_response(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
+    let response = response_options(ctx, p)?
+        .ok_or_else(|| MdgError::argument("Provide --response <markdown> or --response-file <path>."))?;
+    run_edit(ctx, p, |doc| {
+        let module_id = resolve_module_id(doc, &p.args[1])?;
+        let port_id = resolve_port_id(doc, &module_id, &p.args[2])?;
+        Ok(Outcome {
+            document: update_port_response(doc, &module_id, &port_id, &response)?,
+            message: format!("Updated response of {module_id}:{port_id}"),
+            result: vec![("moduleId", json!(module_id)), ("portId", json!(port_id))],
+        })
+    })
+}
+
+pub fn port_set_kind(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
+    let kind = parse_kind(&p.args[3])?;
+    run_edit(ctx, p, |doc| {
+        let module_id = resolve_module_id(doc, &p.args[1])?;
+        let port_id = resolve_port_id(doc, &module_id, &p.args[2])?;
+        Ok(Outcome {
+            document: set_port_kind(doc, &module_id, &port_id, kind)?,
+            message: format!(
+                "{module_id}:{port_id} is now {} port",
+                if kind == PortKind::Event { "an event" } else { "a request/response" }
+            ),
+            result: vec![("moduleId", json!(module_id)), ("portId", json!(port_id)), ("kind", json!(kind))],
         })
     })
 }
@@ -245,7 +375,8 @@ pub fn port_set_description(ctx: &mut Context<'_>, p: &Args) -> Result<()> {
 fn describe_step(step: &RouteStep) -> String {
     match step {
         RouteStep::CreatePort { module_id, direction, port } => {
-            format!("  + {direction} {module_id}:{} \"{}\"", port.id, port.name)
+            let kind = if port.kind == PortKind::Request { "request " } else { "" };
+            format!("  + {kind}{direction} {module_id}:{} \"{}\"", port.id, port.name)
         }
         RouteStep::ReusePort { module_id, direction, port_id } => {
             format!("  = {direction} {module_id}:{port_id} (reused)")

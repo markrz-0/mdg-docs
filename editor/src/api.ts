@@ -8,11 +8,25 @@ import { invoke } from '@tauri-apps/api/core';
 
 export type PortDirection = 'input' | 'output';
 
+/**
+ * `event`: one-way message (outputs emit, inputs listen).
+ * `request`: a request answered over the same connection (outputs send it,
+ * inputs handle it).
+ */
+export type PortKind = 'event' | 'request';
+
 export interface Port {
   id: string;
   name: string;
+  /** Omitted for event ports. */
+  kind?: PortKind;
+  /** For a request port: the request contract. */
   description: string;
+  /** Request ports only; omitted when empty. */
+  response?: string;
 }
+
+export const portKind = (port: Port): PortKind => port.kind ?? 'event';
 
 export interface Endpoint {
   moduleId: string;
@@ -25,6 +39,14 @@ export interface Connection {
   to: Endpoint;
 }
 
+/** A document-level label modules can carry. */
+export interface Tag {
+  id: string;
+  name: string;
+  /** `#rrggbb`. */
+  color: string;
+}
+
 export interface Module {
   id: string;
   parentId: string | null;
@@ -34,7 +56,11 @@ export interface Module {
   outputs: Port[];
   childIds: string[];
   connections: Connection[];
+  /** IDs of the document tags the module carries; omitted when empty. */
+  tags?: string[];
 }
+
+export const moduleTags = (module: Module): string[] => module.tags ?? [];
 
 export interface Position {
   x: number;
@@ -45,6 +71,7 @@ export interface DocumentView {
   rootId: string;
   title: string;
   modules: Record<string, Module>;
+  tags: Tag[];
 }
 
 export type Selection =
@@ -130,8 +157,19 @@ export const commands = {
     invoke<View>('rename_port_cmd', { moduleId, portId, name }),
   setPortDescription: (moduleId: string, portId: string, text: string) =>
     invoke<View>('set_port_description', { moduleId, portId, text }),
-  addChildModule: () => invoke<View>('add_child_module'),
-  addPort: (moduleId: string, direction: PortDirection) => invoke<View>('add_port', { moduleId, direction }),
+  setPortResponse: (moduleId: string, portId: string, text: string) =>
+    invoke<View>('set_port_response', { moduleId, portId, text }),
+  setPortKind: (moduleId: string, portId: string, kind: PortKind) =>
+    invoke<View>('set_port_kind_cmd', { moduleId, portId, kind }),
+  setModuleTags: (moduleId: string, tags: string[]) => invoke<View>('set_module_tags_cmd', { moduleId, tags }),
+  addTag: (name: string, color: string) => invoke<View>('add_tag_cmd', { name, color }),
+  updateTag: (tagId: string, change: { name?: string; color?: string }) =>
+    invoke<View>('update_tag_cmd', { tagId, name: change.name ?? null, color: change.color ?? null }),
+  moveTag: (tagId: string, index: number) => invoke<View>('move_tag_cmd', { tagId, index }),
+  removeTag: (tagId: string) => invoke<View>('remove_tag_cmd', { tagId }),
+  addChildModule: (at?: Position) => invoke<View>('add_child_module', { at: at ?? null }),
+  addPort: (moduleId: string, direction: PortDirection, kind: PortKind) =>
+    invoke<View>('add_port', { moduleId, direction, kind }),
   connect: (from: Endpoint, to: Endpoint) => invoke<View>('connect', { from, to }),
   deleteModule: (moduleId: string, cascade: boolean) => invoke<View>('delete_module', { moduleId, cascade }),
   deletePort: (moduleId: string, portId: string, cascade: boolean) =>

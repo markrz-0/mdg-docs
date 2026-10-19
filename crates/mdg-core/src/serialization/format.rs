@@ -30,3 +30,8 @@ pub fn module_content_id(module_id: &str) -> String {
 pub fn port_content_id(module_id: &str, port_id: &str) -> String {
     format!("port/{module_id}/{port_id}")
 }
+
+/// Content ID of a request port's response block.
+pub fn port_response_content_id(module_id: &str, port_id: &str) -> String {
+    format!("port/{module_id}/{port_id}/response")
+}
